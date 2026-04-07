@@ -31,7 +31,13 @@
 %exec-class GitConfigManagerTest
 
 public class GitConfigManagerTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
     constructor() : Test("GitConfigManagerTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-cfgmgr-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
         addTestCase("read/write config", \testReadWriteConfig());
         addTestCase("delete config", \testDeleteConfig());
         addTestCase("list configs", \testListConfigs());
@@ -41,8 +47,15 @@ public class GitConfigManagerTest inherits QUnit::Test {
         addTestCase("tags", \testTags());
         addTestCase("pending changes", \testPendingChanges());
         addTestCase("identity", \testIdentity());
+        addTestCase("sync with local bare repo", \testSync());
 
         set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
     }
 
     private GitConfigManager::GitConfigManager setupMgr() {
@@ -53,7 +66,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testReadWriteConfig() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.writeConfig("config/app.yaml", "port: 8080\n");
         *string content = mgr.readConfig("config/app.yaml");
@@ -65,7 +78,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testDeleteConfig() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.writeConfig("temp.txt", "temporary\n");
         assertTrue(mgr.configExists("temp.txt"), "config exists after write");
@@ -75,7 +88,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testListConfigs() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.writeConfig("a.yaml", "a\n");
         mgr.writeConfig("b.yaml", "b\n");
@@ -86,7 +99,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testPublish() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.writeConfig("init.yaml", "version: 1\n");
         hash<auto> result = mgr.publish("Initial config");
@@ -98,7 +111,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testEnvironments() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         # Need initial commit for branches to work
         mgr.writeConfig("base.yaml", "base\n");
@@ -123,7 +136,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testHistory() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.writeConfig("f1.txt", "a\n");
         mgr.publish("First");
@@ -140,7 +153,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testTags() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.writeConfig("v1.yaml", "version: 1\n");
         mgr.publish("Version 1");
@@ -152,7 +165,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testPendingChanges() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         hash<auto> empty = mgr.pendingChanges();
         assertEq(0, empty.size(), "no pending changes initially");
@@ -164,7 +177,7 @@ public class GitConfigManagerTest inherits QUnit::Test {
     }
 
     private testIdentity() {
-        auto mgr = setupMgr();
+        GitConfigManager::GitConfigManager mgr = setupMgr();
 
         mgr.setIdentity("New Author", "author@example.com");
         mgr.writeConfig("f.txt", "content\n");
@@ -173,5 +186,50 @@ public class GitConfigManagerTest inherits QUnit::Test {
         list<hash<auto>> hist = mgr.history();
         assertEq("New Author", hist[0].author.name, "identity name set correctly");
         assertEq("author@example.com", hist[0].author.email, "identity email set correctly");
+    }
+
+    private testSync() {
+        # Create a bare "server" repo with a commit
+        string bare_path = m_tmpdir + "/cfg-server.git";
+        Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+
+        string setup_path = m_tmpdir + "/cfg-setup";
+        Git::GitRepository setup = Git::GitRepository::init(setup_path);
+        setup.configSet("user.name", "Setup");
+        setup.configSet("user.email", "setup@test.com");
+        setup.addRemote("origin", bare_path);
+        {
+            File f();
+            f.open(setup_path + "/config.yaml", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("key: value\n");
+        }
+        setup.add("config.yaml");
+        setup.commit("Initial config");
+        setup.push();
+
+        # Create a virtual config manager pointing at the bare repo
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "SyncBot");
+        repo.configSet("user.email", "sync@test.com");
+        repo.addRemote("origin", bare_path);
+        GitConfigManager::GitConfigManager mgr(repo);
+
+        # Sync fetches from remote — HEAD stays unborn until checkout
+        hash<auto> result = mgr.sync();
+        # Both old_head and new_head are NOTHING (HEAD is unborn in virtual repo)
+        assertFalse(result.changes, "no HEAD change on fetch alone");
+
+        # Checkout the remote branch to update HEAD (via manager to keep last_head_id in sync)
+        list<string> remote_branches = repo.branches(True);
+        assertTrue(remote_branches.size() > 0, "remote branches fetched");
+        mgr.switchEnvironment(remote_branches[0]);
+
+        # Verify we can read the config after sync + checkout
+        *string content = mgr.readConfig("config.yaml");
+        assertEq("key: value\n", content, "config readable after sync + checkout");
+
+        # Now sync again — no new commits on remote, so no changes
+        hash<auto> result2 = mgr.sync();
+        assertFalse(result2.changes, "no changes on second sync");
     }
 }

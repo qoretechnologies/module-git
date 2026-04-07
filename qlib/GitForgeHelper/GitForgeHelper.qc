@@ -58,17 +58,33 @@ public class GitForgeHelper {
 
         #! GitLab project ID (resolved on first use)
         *int gitlab_project_id;
+
+        #! Mutex for thread-safe lazy initialization
+        Mutex rest_mutex();
     }
 
     #! Creates the forge helper
     /** @param forge_type "github" or "gitlab"
         @param opts configuration options:
-        - \c owner: repository owner/organization (GitHub) or project namespace (GitLab)
-        - \c repo: repository name
-        - \c token: API access token
+        - \c owner: (required) repository owner/organization (GitHub) or project namespace (GitLab)
+        - \c repo: (required) repository name
+        - \c token: (required) API access token
         - \c url: GitLab instance URL (default: "https://gitlab.com"); ignored for GitHub
+
+        @throw GIT-FORGE-ERROR unsupported forge type or missing required options
     */
     constructor(string forge_type, hash<auto> opts) {
+        # Validate required options
+        if (!opts.owner) {
+            throw "GIT-FORGE-ERROR", "missing required option 'owner'";
+        }
+        if (!opts.repo) {
+            throw "GIT-FORGE-ERROR", "missing required option 'repo'";
+        }
+        if (!opts.token) {
+            throw "GIT-FORGE-ERROR", "missing required option 'token'";
+        }
+
         self.forge_type = forge_type;
         owner = opts.owner;
         repo_name = opts.repo;
@@ -96,10 +112,13 @@ public class GitForgeHelper {
         }
     }
 
-    #! Returns the REST client, creating it on first use
+    #! Returns the REST client, creating it on first use (thread-safe)
     private RestClient::RestClient getRestClient() {
         if (!rest) {
-            rest = new RestClient::RestClient(rest_config);
+            AutoLock al(rest_mutex);
+            if (!rest) {
+                rest = new RestClient::RestClient(rest_config);
+            }
         }
         return rest;
     }
@@ -109,10 +128,13 @@ public class GitForgeHelper {
         @param base the target branch
         @param title the PR/MR title
         @param body the PR/MR description
+
         @return a hash with keys:
         - \c id: the PR/MR number/IID
         - \c url: the web URL of the PR/MR
         - \c state: the PR/MR state
+
+        @throw GIT-FORGE-ERROR API call failed
     */
     hash<auto> createPullRequest(string head, string base, string title, *string body) {
         if (forge_type == FORGE_GITHUB) {
@@ -126,9 +148,9 @@ public class GitForgeHelper {
                 },
             ).body;
             return {
-                "id": resp.number,
-                "url": resp.html_url,
-                "state": resp.state,
+                "id": int(resp.number),
+                "url": string(resp.html_url ?? ""),
+                "state": string(resp.state ?? ""),
             };
         } else {
             int pid = getGitLabProjectId();
@@ -142,31 +164,35 @@ public class GitForgeHelper {
                 },
             ).body;
             return {
-                "id": resp.iid,
-                "url": resp.web_url,
-                "state": resp.state,
+                "id": int(resp.iid),
+                "url": string(resp.web_url ?? ""),
+                "state": string(resp.state ?? ""),
             };
         }
     }
 
     #! Lists open pull requests / merge requests
     /** @param state the state to filter by (default: "open")
+
         @return a list of PR/MR info hashes
+
+        @throw GIT-FORGE-ERROR API call failed
     */
     list<hash<auto>> listPullRequests(string state = "open") {
         if (forge_type == FORGE_GITHUB) {
             list<auto> resp = getRestClient().get(
-                sprintf("/repos/%s/%s/pulls?state=%s", owner, repo_name, state),
+                sprintf("/repos/%s/%s/pulls?state=%s", owner, repo_name,
+                    Qore::encode_url(state, True)),
             ).body;
             list<hash<auto>> result = ();
-            foreach auto item in (resp) {
+            foreach hash<auto> item in (resp) {
                 result += {
                     "id": int(item.number),
-                    "title": string(item.title),
-                    "url": string(item.html_url),
-                    "state": string(item.state),
-                    "head": string(item.head.ref),
-                    "base": string(item.base.ref),
+                    "title": string(item.title ?? ""),
+                    "url": string(item.html_url ?? ""),
+                    "state": string(item.state ?? ""),
+                    "head": string(item.head.ref ?? ""),
+                    "base": string(item.base.ref ?? ""),
                 };
             }
             return result;
@@ -174,17 +200,18 @@ public class GitForgeHelper {
             int pid = getGitLabProjectId();
             string gl_state = state == "open" ? "opened" : state;
             list<auto> resp = getRestClient().get(
-                sprintf("/projects/%d/merge_requests?state=%s", pid, gl_state),
+                sprintf("/projects/%d/merge_requests?state=%s", pid,
+                    Qore::encode_url(gl_state, True)),
             ).body;
             list<hash<auto>> result = ();
-            foreach auto item in (resp) {
+            foreach hash<auto> item in (resp) {
                 result += {
                     "id": int(item.iid),
-                    "title": string(item.title),
-                    "url": string(item.web_url),
-                    "state": string(item.state),
-                    "head": string(item.source_branch),
-                    "base": string(item.target_branch),
+                    "title": string(item.title ?? ""),
+                    "url": string(item.web_url ?? ""),
+                    "state": string(item.state ?? ""),
+                    "head": string(item.source_branch ?? ""),
+                    "base": string(item.target_branch ?? ""),
                 };
             }
             return result;
@@ -193,7 +220,10 @@ public class GitForgeHelper {
 
     #! Gets a specific pull request / merge request
     /** @param pr_id the PR number (GitHub) or MR IID (GitLab)
+
         @return a hash with PR/MR details
+
+        @throw GIT-FORGE-ERROR API call failed
     */
     hash<auto> getPullRequest(int pr_id) {
         if (forge_type == FORGE_GITHUB) {
@@ -201,14 +231,14 @@ public class GitForgeHelper {
                 sprintf("/repos/%s/%s/pulls/%d", owner, repo_name, pr_id),
             ).body;
             return {
-                "id": resp.number,
-                "title": resp.title,
-                "body": resp.body,
-                "url": resp.html_url,
-                "state": resp.state,
-                "head": resp.head.ref,
-                "base": resp.base.ref,
-                "merged": resp.merged,
+                "id": int(resp.number),
+                "title": string(resp.title ?? ""),
+                "body": string(resp.body ?? ""),
+                "url": string(resp.html_url ?? ""),
+                "state": string(resp.state ?? ""),
+                "head": string(resp.head.ref ?? ""),
+                "base": string(resp.base.ref ?? ""),
+                "merged": boolean(resp.merged ?? False),
             };
         } else {
             int pid = getGitLabProjectId();
@@ -216,13 +246,13 @@ public class GitForgeHelper {
                 sprintf("/projects/%d/merge_requests/%d", pid, pr_id),
             ).body;
             return {
-                "id": resp.iid,
-                "title": resp.title,
-                "body": resp.description,
-                "url": resp.web_url,
-                "state": resp.state,
-                "head": resp.source_branch,
-                "base": resp.target_branch,
+                "id": int(resp.iid),
+                "title": string(resp.title ?? ""),
+                "body": string(resp.description ?? ""),
+                "url": string(resp.web_url ?? ""),
+                "state": string(resp.state ?? ""),
+                "head": string(resp.source_branch ?? ""),
+                "base": string(resp.target_branch ?? ""),
                 "merged": resp.state == "merged",
             };
         }
@@ -230,6 +260,8 @@ public class GitForgeHelper {
 
     #! Closes a pull request / merge request
     /** @param pr_id the PR number (GitHub) or MR IID (GitLab)
+
+        @throw GIT-FORGE-ERROR API call failed
     */
     closePullRequest(int pr_id) {
         if (forge_type == FORGE_GITHUB) {
@@ -247,12 +279,23 @@ public class GitForgeHelper {
     }
 
     #! Returns the forge type
+    /** @return "github" or "gitlab"
+    */
     string getForgeType() {
         return forge_type;
     }
 
-    #! Resolves the GitLab project ID from owner/repo
+    #! Resolves the GitLab project ID from owner/repo (thread-safe, cached)
+    /** @return the GitLab project ID
+
+        @throw GIT-FORGE-ERROR API call failed
+    */
     private int getGitLabProjectId() {
+        if (gitlab_project_id) {
+            return gitlab_project_id;
+        }
+        AutoLock al(rest_mutex);
+        # Double-check after acquiring lock
         if (gitlab_project_id) {
             return gitlab_project_id;
         }
@@ -260,7 +303,7 @@ public class GitForgeHelper {
         hash<auto> resp = getRestClient().get(
             sprintf("/projects/%s", Qore::encode_url(path, True)),
         ).body;
-        gitlab_project_id = resp.id;
+        gitlab_project_id = int(resp.id);
         return gitlab_project_id;
     }
 }

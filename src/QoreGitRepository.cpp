@@ -348,9 +348,19 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
             }
 
             FILE* f = fopen(full_path.c_str(), "wb");
-            if (f) {
-                fwrite(data, 1, len, f);
-                fclose(f);
+            if (!f) {
+                xsink->raiseException("GIT-WRITE-ERROR",
+                    "failed to open file '%s' for writing: %s",
+                    full_path.c_str(), strerror(errno));
+                return -1;
+            }
+            size_t written = fwrite(data, 1, len, f);
+            fclose(f);
+            if (written != len) {
+                xsink->raiseException("GIT-WRITE-ERROR",
+                    "failed to write %zu bytes to '%s': only %zu written",
+                    len, full_path.c_str(), written);
+                return -1;
             }
 
             // Stage the file
@@ -464,6 +474,7 @@ QoreListNode* QoreGitRepository::listFiles(const char* glob, bool recursive, Exc
     }
 
     // Also list from HEAD tree (if any files not in virtual tree)
+    // Uses a recursive walk to handle nested directories
     git_reference* head_ref = nullptr;
     int rc = git_repository_head(&head_ref, m_repo);
     if (rc == 0) {
@@ -475,18 +486,36 @@ QoreListNode* QoreGitRepository::listFiles(const char* glob, bool recursive, Exc
             rc = git_commit_tree(&tree, commit);
             git_commit_free(commit);
             if (rc == 0) {
-                size_t count = git_tree_entrycount(tree);
-                for (size_t i = 0; i < count; i++) {
-                    if ((i % 100) == 0 && qore_check_cancel(xsink, "git list files")) {
-                        git_tree_free(tree);
-                        return nullptr;
+                int walk_count = 0;
+                std::function<int(const git_tree*, const std::string&)> walkTree =
+                    [&](const git_tree* t, const std::string& prefix) -> int {
+                    size_t count = git_tree_entrycount(t);
+                    for (size_t i = 0; i < count; i++) {
+                        if ((++walk_count % 100) == 0 && qore_check_cancel(xsink, "git list files")) {
+                            return -1;
+                        }
+                        const git_tree_entry* entry = git_tree_entry_byindex(t, i);
+                        const char* name = git_tree_entry_name(entry);
+                        std::string full_path = prefix.empty() ? name : prefix + "/" + name;
+
+                        if (git_tree_entry_type(entry) == GIT_OBJECT_TREE) {
+                            git_tree* subtree = nullptr;
+                            if (git_tree_lookup(&subtree, m_repo, git_tree_entry_id(entry)) == 0) {
+                                int rv = walkTree(subtree, full_path);
+                                git_tree_free(subtree);
+                                if (rv < 0) {
+                                    return -1;
+                                }
+                            }
+                        } else if (git_tree_entry_type(entry) == GIT_OBJECT_BLOB) {
+                            if (!m_virtual_tree.count(full_path)) {
+                                result->push(new QoreStringNode(full_path), xsink);
+                            }
+                        }
                     }
-                    const git_tree_entry* entry = git_tree_entry_byindex(tree, i);
-                    const char* name = git_tree_entry_name(entry);
-                    if (!m_virtual_tree.count(name)) {
-                        result->push(new QoreStringNode(name), xsink);
-                    }
-                }
+                    return 0;
+                };
+                walkTree(tree, "");
                 git_tree_free(tree);
             }
         }
@@ -538,8 +567,11 @@ QoreStringNode* QoreGitRepository::commit(const char* message, ExceptionSink* xs
             git_config_entry* email_entry = nullptr;
             if (git_config_get_entry(&name_entry, config, "user.name") == 0 &&
                 git_config_get_entry(&email_entry, config, "user.email") == 0) {
-                git_signature_free(sig);
-                git_signature_now(&sig, name_entry->value, email_entry->value);
+                git_signature* new_sig = nullptr;
+                if (git_signature_now(&new_sig, name_entry->value, email_entry->value) == 0) {
+                    git_signature_free(sig);
+                    sig = new_sig;
+                }
                 git_config_entry_free(email_entry);
             }
             if (name_entry) {
@@ -1494,21 +1526,22 @@ QoreListNode* QoreGitRepository::log(int max_count, const char* path, ExceptionS
                 if (git_commit_parent(&parent, commit, 0) == 0) {
                     git_tree* commit_tree = nullptr;
                     git_tree* parent_tree = nullptr;
-                    if (git_commit_tree(&commit_tree, commit) == 0 &&
-                        git_commit_tree(&parent_tree, parent) == 0) {
-                        git_diff_options diff_opts;
-                        git_diff_options_init(&diff_opts, GIT_DIFF_OPTIONS_VERSION);
-                        const char* pathspec = path;
-                        diff_opts.pathspec.strings = const_cast<char**>(&pathspec);
-                        diff_opts.pathspec.count = 1;
+                    if (git_commit_tree(&commit_tree, commit) == 0) {
+                        if (git_commit_tree(&parent_tree, parent) == 0) {
+                            git_diff_options diff_opts;
+                            git_diff_options_init(&diff_opts, GIT_DIFF_OPTIONS_VERSION);
+                            const char* pathspec = path;
+                            diff_opts.pathspec.strings = const_cast<char**>(&pathspec);
+                            diff_opts.pathspec.count = 1;
 
-                        git_diff* d = nullptr;
-                        if (git_diff_tree_to_tree(&d, m_repo, parent_tree, commit_tree, &diff_opts) == 0) {
-                            touches_path = git_diff_num_deltas(d) > 0;
-                            git_diff_free(d);
+                            git_diff* d = nullptr;
+                            if (git_diff_tree_to_tree(&d, m_repo, parent_tree, commit_tree, &diff_opts) == 0) {
+                                touches_path = git_diff_num_deltas(d) > 0;
+                                git_diff_free(d);
+                            }
+                            git_tree_free(parent_tree);
                         }
                         git_tree_free(commit_tree);
-                        git_tree_free(parent_tree);
                     }
                     git_commit_free(parent);
                 }
@@ -1590,17 +1623,20 @@ int QoreGitRepository::removeRemote(const char* name, ExceptionSink* xsink) {
 }
 
 int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
-    AutoLocker al(m_lock);
-    if (!checkRepo(xsink)) {
-        return -1;
-    }
-
-    const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
-
     git_remote* remote = nullptr;
-    int rc = git_remote_lookup(&remote, m_repo, rname);
-    if (rc < 0) {
-        return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
+
+    // Hold lock only for repo access and remote lookup
+    {
+        AutoLocker al(m_lock);
+        if (!checkRepo(xsink)) {
+            return -1;
+        }
+
+        const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
+        int rc = git_remote_lookup(&remote, m_repo, rname);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
+        }
     }
 
     // Pre-operation cancel check before blocking network I/O
@@ -1614,7 +1650,8 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
     opts.callbacks.transfer_progress = qore_git_transfer_progress_cb;
     opts.callbacks.payload = xsink;
 
-    rc = git_remote_fetch(remote, nullptr, &opts, "fetch");
+    // Network I/O runs without the lock so other read operations are not blocked
+    int rc = git_remote_fetch(remote, nullptr, &opts, "fetch");
     git_remote_free(remote);
     if (rc < 0) {
         if (*xsink) {
@@ -1627,17 +1664,36 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
 }
 
 int QoreGitRepository::push(const char* remote_name, const char* refspec, ExceptionSink* xsink) {
-    AutoLocker al(m_lock);
-    if (!checkRepo(xsink)) {
-        return -1;
-    }
-
-    const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
-
     git_remote* remote = nullptr;
-    int rc = git_remote_lookup(&remote, m_repo, rname);
-    if (rc < 0) {
-        return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
+    std::string rs;
+
+    // Hold lock only for repo access, remote lookup, and HEAD resolution
+    {
+        AutoLocker al(m_lock);
+        if (!checkRepo(xsink)) {
+            return -1;
+        }
+
+        const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
+        int rc = git_remote_lookup(&remote, m_repo, rname);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
+        }
+
+        // Build refspec while holding the lock (needs HEAD access)
+        if (refspec && *refspec) {
+            rs = refspec;
+        } else {
+            git_reference* head_ref = nullptr;
+            rc = git_repository_head(&head_ref, m_repo);
+            if (rc == 0) {
+                const char* head_name = git_reference_name(head_ref);
+                rs = std::string(head_name) + ":" + head_name;
+                git_reference_free(head_ref);
+            } else {
+                rs = "refs/heads/main:refs/heads/main";
+            }
+        }
     }
 
     // Pre-operation cancel check before blocking network I/O
@@ -1651,28 +1707,13 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
     opts.callbacks.transfer_progress = qore_git_transfer_progress_cb;
     opts.callbacks.payload = xsink;
 
-    // Build refspec
-    git_strarray refspecs;
-    std::string rs;
-    if (refspec && *refspec) {
-        rs = refspec;
-    } else {
-        // Default: push current branch
-        git_reference* head_ref = nullptr;
-        rc = git_repository_head(&head_ref, m_repo);
-        if (rc == 0) {
-            const char* head_name = git_reference_name(head_ref);
-            rs = std::string(head_name) + ":" + head_name;
-            git_reference_free(head_ref);
-        } else {
-            rs = "refs/heads/main:refs/heads/main";
-        }
-    }
     char* rs_ptr = const_cast<char*>(rs.c_str());
+    git_strarray refspecs;
     refspecs.strings = &rs_ptr;
     refspecs.count = 1;
 
-    rc = git_remote_push(remote, &refspecs, &opts);
+    // Network I/O runs without the lock so other read operations are not blocked
+    int rc = git_remote_push(remote, &refspecs, &opts);
     git_remote_free(remote);
     if (rc < 0) {
         if (*xsink) {

@@ -76,8 +76,13 @@ public class GitDataProvider inherits AbstractDataProvider {
     }
 
     #! Creates the provider from constructor options
+    /** @throw CONSTRUCTOR-ERROR missing or conflicting options
+    */
     constructor(hash<auto> options) {
         *hash<auto> copts = checkOptions("CONSTRUCTOR-ERROR", ConstructorOptions, options);
+        if (copts.path && copts.virtual) {
+            throw "CONSTRUCTOR-ERROR", "'path' and 'virtual' options are mutually exclusive";
+        }
         if (copts.path) {
             repo = new Git::GitRepository(copts.path);
         } else if (copts.virtual) {

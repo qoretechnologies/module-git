@@ -119,22 +119,8 @@ public class GitWriteFileResponseDataType inherits HashDataType {
 
 # --- List Files ---
 
-#! Request type for list-files action
+#! Request type for list-files action (no input required — always lists all files recursively)
 public class GitListFilesRequestDataType inherits HashDataType {
-    public {
-        const Fields = {
-            "recursive": {
-                "type": SoftBoolType,
-                "display_name": "Recursive",
-                "desc": "If `True`, list files recursively",
-                "default_value": True,
-            },
-        };
-    }
-
-    constructor() {
-        addQoreFields(Fields);
-    }
 }
 
 #! Response type for list-files action

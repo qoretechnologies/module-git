@@ -34,6 +34,7 @@ public class GitForgeHelperTest inherits QUnit::Test {
         addTestCase("github helper creation", \testGitHubCreation());
         addTestCase("gitlab helper creation", \testGitLabCreation());
         addTestCase("invalid forge type", \testInvalidForge());
+        addTestCase("missing required options", \testMissingOptions());
         addTestCase("forge type accessor", \testForgeType());
 
         set_return_value(main());
@@ -69,6 +70,41 @@ public class GitForgeHelperTest inherits QUnit::Test {
             },
             NOTHING,
             "invalid forge type throws");
+    }
+
+    private testMissingOptions() {
+        # Missing owner
+        assertThrows("GIT-FORGE-ERROR",
+            sub () {
+                new GitForgeHelper::GitForgeHelper("github", {
+                    "repo": "test",
+                    "token": "test",
+                });
+            },
+            NOTHING,
+            "missing owner throws");
+
+        # Missing repo
+        assertThrows("GIT-FORGE-ERROR",
+            sub () {
+                new GitForgeHelper::GitForgeHelper("github", {
+                    "owner": "test",
+                    "token": "test",
+                });
+            },
+            NOTHING,
+            "missing repo throws");
+
+        # Missing token
+        assertThrows("GIT-FORGE-ERROR",
+            sub () {
+                new GitForgeHelper::GitForgeHelper("github", {
+                    "owner": "test",
+                    "repo": "test",
+                });
+            },
+            NOTHING,
+            "missing token throws");
     }
 
     private testForgeType() {

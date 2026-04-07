@@ -41,6 +41,7 @@ public class GitDataProviderTest inherits QUnit::Test {
         addTestCase("log action", \testLog());
         addTestCase("status action", \testStatus());
         addTestCase("full workflow: write, commit, log, read", \testFullWorkflow());
+        addTestCase("constructor options", \testConstructorOptions());
 
         set_return_value(main());
     }
@@ -175,5 +176,27 @@ public class GitDataProviderTest inherits QUnit::Test {
         assertEq(1, log_result.commits.size(), "workflow: 1 commit in log");
         assertEq("Workflow", log_result.commits[0].author.name,
             "workflow: author name correct");
+    }
+
+    private testConstructorOptions() {
+        # Virtual mode via options
+        GitDataProvider::GitDataProvider dp({"virtual": True});
+        assertEq("git", dp.getName(), "virtual mode via options");
+
+        # Mutual exclusivity check
+        assertThrows("CONSTRUCTOR-ERROR",
+            sub () {
+                new GitDataProvider::GitDataProvider({"path": "/tmp", "virtual": True});
+            },
+            NOTHING,
+            "path and virtual mutually exclusive");
+
+        # Missing both options
+        assertThrows("CONSTRUCTOR-ERROR",
+            sub () {
+                new GitDataProvider::GitDataProvider({});
+            },
+            NOTHING,
+            "missing path and virtual throws");
     }
 }
