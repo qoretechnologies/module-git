@@ -128,6 +128,19 @@ public:
     DLLLOCAL int configSet(const char* key, const char* value, ExceptionSink* xsink);
     DLLLOCAL QoreStringNode* configGet(const char* key, ExceptionSink* xsink);
 
+    // --- Branch Operations ---
+    DLLLOCAL int createBranch(const char* name, const char* from_ref, ExceptionSink* xsink);
+    DLLLOCAL int deleteBranch(const char* name, ExceptionSink* xsink);
+    DLLLOCAL int checkout(const char* ref, ExceptionSink* xsink);
+    DLLLOCAL QoreListNode* listBranches(bool remote, ExceptionSink* xsink);
+    DLLLOCAL QoreStringNode* currentBranch(ExceptionSink* xsink);
+
+    // --- Tag Operations ---
+    DLLLOCAL int createTag(const char* name, const char* message, const char* target_ref,
+                           ExceptionSink* xsink);
+    DLLLOCAL int deleteTag(const char* name, ExceptionSink* xsink);
+    DLLLOCAL QoreListNode* listTags(ExceptionSink* xsink);
+
     // --- Access to internals (for child classes) ---
     DLLLOCAL git_repository* getRepo() const { return m_repo; }
     DLLLOCAL QoreThreadLock& getLock() const { return m_lock; }

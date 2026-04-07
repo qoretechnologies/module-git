@@ -427,3 +427,144 @@ nothing GitRepository::configSet(string key, string value) {
 *string GitRepository::configGet(string key) {
     return repo->configGet(key->c_str(), xsink);
 }
+
+// --- Branch Operations ---
+
+//! Creates a new branch
+/** @par Example:
+    @code{.py}
+repo.createBranch("feature-x");
+repo.createBranch("bugfix", "v1.0");  # branch from tag
+    @endcode
+
+    @param name the branch name
+    @param from_ref optional ref to branch from (default: HEAD)
+
+    @throw GIT-BRANCH-ERROR failed to create branch
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::createBranch(string name, *string from_ref) {
+    repo->createBranch(name->c_str(), from_ref ? from_ref->c_str() : nullptr, xsink);
+}
+
+//! Deletes a local branch
+/** @par Example:
+    @code{.py}
+repo.deleteBranch("feature-x");
+    @endcode
+
+    @param name the branch name
+
+    @throw GIT-BRANCH-ERROR failed to delete branch (e.g., branch not found or is current)
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::deleteBranch(string name) {
+    repo->deleteBranch(name->c_str(), xsink);
+}
+
+//! Checks out a branch or ref
+/** In disk mode, updates the working directory. In virtual mode, populates the
+    virtual tree from the ref's commit tree.
+
+    @par Example:
+    @code{.py}
+repo.checkout("main");
+repo.checkout("feature-x");
+    @endcode
+
+    @param ref the branch name, tag name, or commit SHA to checkout
+
+    @throw GIT-CHECKOUT-ERROR failed to checkout
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::checkout(string ref) {
+    repo->checkout(ref->c_str(), xsink);
+}
+
+//! Lists branches
+/** @par Example:
+    @code{.py}
+list<string> local = repo.branches();
+list<string> remote = repo.branches(True);
+    @endcode
+
+    @param remote if @ref True "True", list remote tracking branches instead of local
+
+    @return a list of branch names
+
+    @throw GIT-BRANCH-ERROR failed to list branches
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+list<string> GitRepository::branches(*bool remote) {
+    return repo->listBranches(remote, xsink);
+}
+
+//! Returns the name of the current branch, or @ref nothing for detached HEAD
+/** @par Example:
+    @code{.py}
+*string branch = repo.currentBranch();
+    @endcode
+
+    @return the current branch name, or @ref nothing if HEAD is detached
+
+    @throw GIT-BRANCH-ERROR failed to get current branch
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+*string GitRepository::currentBranch() {
+    return repo->currentBranch(xsink);
+}
+
+// --- Tag Operations ---
+
+//! Creates a tag
+/** If @a message is provided, creates an annotated tag; otherwise a lightweight tag.
+
+    @par Example:
+    @code{.py}
+repo.createTag("v1.0", "Release 1.0");       # annotated tag at HEAD
+repo.createTag("v0.9");                       # lightweight tag at HEAD
+repo.createTag("v0.8", "Old release", "abc123");  # tag specific commit
+    @endcode
+
+    @param name the tag name
+    @param message optional tag message (if provided, creates annotated tag)
+    @param target_ref optional ref to tag (default: HEAD)
+
+    @throw GIT-TAG-ERROR failed to create tag
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::createTag(string name, *string message, *string target_ref) {
+    repo->createTag(name->c_str(),
+                    message ? message->c_str() : nullptr,
+                    target_ref ? target_ref->c_str() : nullptr, xsink);
+}
+
+//! Deletes a tag
+/** @par Example:
+    @code{.py}
+repo.deleteTag("v1.0");
+    @endcode
+
+    @param name the tag name
+
+    @throw GIT-TAG-ERROR failed to delete tag
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::deleteTag(string name) {
+    repo->deleteTag(name->c_str(), xsink);
+}
+
+//! Lists all tags
+/** @par Example:
+    @code{.py}
+list<string> tags = repo.tags();
+    @endcode
+
+    @return a list of tag names
+
+    @throw GIT-TAG-ERROR failed to list tags
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+list<string> GitRepository::tags() {
+    return repo->listTags(xsink);
+}

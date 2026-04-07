@@ -578,11 +578,32 @@ QoreStringNode* QoreGitRepository::commit(const char* message, ExceptionSink* xs
             git_reference_free(head_ref);
         }
 
+        // Determine which ref to update
+        // If HEAD is a symbolic ref (points to a branch), update that branch
+        // Otherwise (first commit), create refs/heads/main and point HEAD to it
+        std::string update_ref;
+        if (has_parent) {
+            // Existing HEAD — check if it's a symbolic ref
+            git_reference* head_test = nullptr;
+            rc = git_reference_lookup(&head_test, m_repo, "HEAD");
+            if (rc == 0 && git_reference_type(head_test) == GIT_REFERENCE_SYMBOLIC) {
+                update_ref = git_reference_symbolic_target(head_test);
+            } else {
+                update_ref = "HEAD";
+            }
+            if (head_test) {
+                git_reference_free(head_test);
+            }
+        } else {
+            // First commit: create main branch and set HEAD as symbolic ref to it
+            update_ref = "refs/heads/main";
+        }
+
         // Create commit
         git_oid commit_oid;
         const git_commit* parents[] = {parent};
         rc = git_commit_create(
-            &commit_oid, m_repo, "HEAD",
+            &commit_oid, m_repo, update_ref.c_str(),
             sig, sig, nullptr, message, tree,
             has_parent ? 1 : 0,
             has_parent ? parents : nullptr
@@ -597,6 +618,16 @@ QoreStringNode* QoreGitRepository::commit(const char* message, ExceptionSink* xs
         if (rc < 0) {
             git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to create commit");
             return nullptr;
+        }
+
+        // For the first commit, set HEAD as symbolic ref to refs/heads/main
+        if (!has_parent) {
+            git_reference* new_head = nullptr;
+            git_reference_symbolic_create(&new_head, m_repo, "HEAD",
+                "refs/heads/main", 1, "initial commit");
+            if (new_head) {
+                git_reference_free(new_head);
+            }
         }
 
         char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
@@ -940,4 +971,327 @@ int QoreGitRepository::populateVirtualTreeFromGitTree(const git_tree* tree,
         }
     }
     return 0;
+}
+
+// --- Branch Operations ---
+
+int QoreGitRepository::createBranch(const char* name, const char* from_ref, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    // Resolve the target commit
+    git_commit* target = nullptr;
+    if (from_ref && *from_ref) {
+        git_object* obj = nullptr;
+        int rc = git_revparse_single(&obj, m_repo, from_ref);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc,
+                "failed to resolve reference for branch target");
+        }
+        rc = git_commit_lookup(&target, m_repo, git_object_id(obj));
+        git_object_free(obj);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc,
+                "failed to look up target commit");
+        }
+    } else {
+        // Default to HEAD
+        git_reference* head_ref = nullptr;
+        int rc = git_repository_head(&head_ref, m_repo);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc,
+                "failed to get HEAD; repository may be empty");
+        }
+        rc = git_commit_lookup(&target, m_repo, git_reference_target(head_ref));
+        git_reference_free(head_ref);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc,
+                "failed to look up HEAD commit");
+        }
+    }
+
+    git_reference* branch_ref = nullptr;
+    int rc = git_branch_create(&branch_ref, m_repo, name, target, 0);
+    git_commit_free(target);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to create branch");
+    }
+    git_reference_free(branch_ref);
+    return 0;
+}
+
+int QoreGitRepository::deleteBranch(const char* name, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    git_reference* branch_ref = nullptr;
+    int rc = git_branch_lookup(&branch_ref, m_repo, name, GIT_BRANCH_LOCAL);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to find branch");
+    }
+
+    rc = git_branch_delete(branch_ref);
+    git_reference_free(branch_ref);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to delete branch");
+    }
+    return 0;
+}
+
+int QoreGitRepository::checkout(const char* ref, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    // Resolve the ref to a commit
+    git_object* target = nullptr;
+    int rc = git_revparse_single(&target, m_repo, ref);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to resolve reference");
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, m_repo, git_object_id(target));
+    git_object_free(target);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to look up commit");
+    }
+
+    if (m_virtual) {
+        // Virtual mode: populate virtual tree from commit's tree
+        git_tree* tree = nullptr;
+        rc = git_commit_tree(&tree, commit);
+        git_commit_free(commit);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to get commit tree");
+        }
+
+        m_virtual_tree.clear();
+        rc = populateVirtualTreeFromGitTree(tree, "", xsink);
+        git_tree_free(tree);
+        if (rc < 0) {
+            return -1;
+        }
+
+        // Update HEAD to point to the ref
+        std::string full_ref = std::string("refs/heads/") + ref;
+        git_reference* existing = nullptr;
+        if (git_reference_lookup(&existing, m_repo, full_ref.c_str()) == 0) {
+            git_reference_free(existing);
+            // Set HEAD as symbolic ref to the branch
+            git_reference* new_head = nullptr;
+            git_reference_symbolic_create(&new_head, m_repo, "HEAD", full_ref.c_str(), 1, "checkout");
+            if (new_head) {
+                git_reference_free(new_head);
+            }
+        } else {
+            // Direct checkout to a commit (detached HEAD)
+            git_object* obj = nullptr;
+            git_revparse_single(&obj, m_repo, ref);
+            if (obj) {
+                git_repository_set_head_detached(m_repo, git_object_id(obj));
+                git_object_free(obj);
+            }
+        }
+    } else {
+        // Disk mode: checkout the working directory
+        git_checkout_options opts;
+        git_checkout_options_init(&opts, GIT_CHECKOUT_OPTIONS_VERSION);
+        opts.checkout_strategy = GIT_CHECKOUT_SAFE;
+
+        rc = git_checkout_tree(m_repo, (git_object*)commit, &opts);
+        git_commit_free(commit);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to checkout tree");
+        }
+
+        // Update HEAD
+        std::string full_ref = std::string("refs/heads/") + ref;
+        git_reference* existing = nullptr;
+        if (git_reference_lookup(&existing, m_repo, full_ref.c_str()) == 0) {
+            git_reference_free(existing);
+            rc = git_repository_set_head(m_repo, full_ref.c_str());
+        } else {
+            git_object* obj = nullptr;
+            git_revparse_single(&obj, m_repo, ref);
+            if (obj) {
+                rc = git_repository_set_head_detached(m_repo, git_object_id(obj));
+                git_object_free(obj);
+            }
+        }
+    }
+
+    return 0;
+}
+
+QoreListNode* QoreGitRepository::listBranches(bool remote, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_branch_t flags = remote ? GIT_BRANCH_REMOTE : GIT_BRANCH_LOCAL;
+    git_branch_iterator* iter = nullptr;
+    int rc = git_branch_iterator_new(&iter, m_repo, flags);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to create branch iterator");
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreListNode> result(new QoreListNode(stringTypeInfo), xsink);
+    git_reference* ref = nullptr;
+    git_branch_t out_type;
+    int count = 0;
+    while ((rc = git_branch_next(&ref, &out_type, iter)) == 0) {
+        if ((++count % 100) == 0 && qore_check_cancel(xsink, "git list branches")) {
+            git_reference_free(ref);
+            git_branch_iterator_free(iter);
+            return nullptr;
+        }
+        const char* name = nullptr;
+        git_branch_name(&name, ref);
+        if (name) {
+            result->push(new QoreStringNode(name), xsink);
+        }
+        git_reference_free(ref);
+    }
+
+    git_branch_iterator_free(iter);
+    return result.release();
+}
+
+QoreStringNode* QoreGitRepository::currentBranch(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_reference* head_ref = nullptr;
+    int rc = git_repository_head(&head_ref, m_repo);
+    if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+        return nullptr;
+    }
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to get HEAD");
+        return nullptr;
+    }
+
+    if (git_reference_is_branch(head_ref)) {
+        const char* name = nullptr;
+        git_branch_name(&name, head_ref);
+        git_reference_free(head_ref);
+        if (name) {
+            return new QoreStringNode(name);
+        }
+    }
+
+    git_reference_free(head_ref);
+    return nullptr;  // detached HEAD
+}
+
+// --- Tag Operations ---
+
+int QoreGitRepository::createTag(const char* name, const char* message, const char* target_ref,
+                                  ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    // Resolve target
+    git_object* target = nullptr;
+    if (target_ref && *target_ref) {
+        int rc = git_revparse_single(&target, m_repo, target_ref);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-TAG-ERROR", rc, "failed to resolve tag target");
+        }
+    } else {
+        // Default to HEAD
+        git_reference* head_ref = nullptr;
+        int rc = git_repository_head(&head_ref, m_repo);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-TAG-ERROR", rc,
+                "failed to get HEAD for tag target");
+        }
+        rc = git_object_lookup(&target, m_repo, git_reference_target(head_ref), GIT_OBJECT_ANY);
+        git_reference_free(head_ref);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-TAG-ERROR", rc,
+                "failed to look up HEAD object");
+        }
+    }
+
+    git_oid tag_oid;
+    int rc;
+
+    if (message && *message) {
+        // Annotated tag
+        git_signature* tagger = nullptr;
+        rc = git_signature_default(&tagger, m_repo);
+        if (rc < 0) {
+            // Fall back to "now" signature
+            rc = git_signature_now(&tagger, "Tagger", "tagger@example.com");
+            if (rc < 0) {
+                git_object_free(target);
+                return git_raise_exception(xsink, "GIT-TAG-ERROR", rc,
+                    "failed to create tagger signature");
+            }
+        }
+
+        rc = git_tag_create(&tag_oid, m_repo, name, target, tagger, message, 0);
+        git_signature_free(tagger);
+    } else {
+        // Lightweight tag
+        rc = git_tag_create_lightweight(&tag_oid, m_repo, name, target, 0);
+    }
+
+    git_object_free(target);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-TAG-ERROR", rc, "failed to create tag");
+    }
+    return 0;
+}
+
+int QoreGitRepository::deleteTag(const char* name, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    int rc = git_tag_delete(m_repo, name);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-TAG-ERROR", rc, "failed to delete tag");
+    }
+    return 0;
+}
+
+QoreListNode* QoreGitRepository::listTags(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_strarray tag_names;
+    int rc = git_tag_list(&tag_names, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-TAG-ERROR", rc, "failed to list tags");
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreListNode> result(new QoreListNode(stringTypeInfo), xsink);
+    for (size_t i = 0; i < tag_names.count; i++) {
+        if ((i % 100) == 0 && qore_check_cancel(xsink, "git list tags")) {
+            git_strarray_dispose(&tag_names);
+            return nullptr;
+        }
+        result->push(new QoreStringNode(tag_names.strings[i]), xsink);
+    }
+
+    git_strarray_dispose(&tag_names);
+    return result.release();
 }

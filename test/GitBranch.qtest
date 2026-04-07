@@ -1,0 +1,208 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitBranch.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitBranchTest
+
+public class GitBranchTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitBranchTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-branch-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+        addTestCase("disk: branch operations", \testDiskBranches());
+        addTestCase("disk: tag operations", \testDiskTags());
+        addTestCase("virtual: branch operations", \testVirtualBranches());
+        addTestCase("virtual: tag operations", \testVirtualTags());
+        addTestCase("virtual: checkout populates tree", \testVirtualCheckout());
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private Git::GitRepository setupDiskRepo() {
+        string path = m_tmpdir + "/branch-repo-" + string(rand());
+        Git::GitRepository repo = Git::GitRepository::init(path);
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        {
+            File f();
+            f.open(path + "/init.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("initial\n");
+        }
+        repo.add("init.txt");
+        repo.commit("Initial commit");
+        return repo;
+    }
+
+    private Git::GitRepository setupVirtualRepo() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        repo.writeFileString("init.txt", "initial\n");
+        repo.commit("Initial commit");
+        return repo;
+    }
+
+    private testDiskBranches() {
+        Git::GitRepository repo = setupDiskRepo();
+
+        # Default branch (master or main, depends on git config)
+        *string current = repo.currentBranch();
+        assertTrue(current.val(), "current branch exists after commit");
+
+        # Create a branch
+        repo.createBranch("feature-a");
+        list<string> branches = repo.branches();
+        assertTrue(branches.size() >= 2, "at least 2 branches after create");
+        assertTrue(inlist("feature-a", branches), "feature-a in branch list");
+
+        # Checkout the branch
+        repo.checkout("feature-a");
+        assertEq("feature-a", repo.currentBranch(), "current branch is feature-a after checkout");
+
+        # Switch back
+        repo.checkout(current);
+        assertEq(current, repo.currentBranch(), "back to original branch");
+
+        # Delete the branch
+        repo.deleteBranch("feature-a");
+        branches = repo.branches();
+        assertFalse(inlist("feature-a", branches), "feature-a deleted");
+    }
+
+    private testDiskTags() {
+        Git::GitRepository repo = setupDiskRepo();
+
+        # Create lightweight tag
+        repo.createTag("v0.1");
+        list<string> tags = repo.tags();
+        assertEq(1, tags.size(), "1 tag after createTag");
+        assertEq("v0.1", tags[0], "tag name correct");
+
+        # Create annotated tag
+        repo.createTag("v1.0", "Release 1.0");
+        tags = repo.tags();
+        assertEq(2, tags.size(), "2 tags");
+
+        # Delete tag
+        repo.deleteTag("v0.1");
+        tags = repo.tags();
+        assertEq(1, tags.size(), "1 tag after delete");
+        assertEq("v1.0", tags[0], "v1.0 remains");
+
+        # Delete remaining
+        repo.deleteTag("v1.0");
+        tags = repo.tags();
+        assertEq(0, tags.size(), "no tags after deleting all");
+    }
+
+    private testVirtualBranches() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        # Create a branch
+        repo.createBranch("dev");
+        list<string> branches = repo.branches();
+        assertTrue(branches.size() >= 2, "at least 2 branches in virtual mode");
+        assertTrue(inlist("dev", branches), "dev branch exists");
+
+        # Checkout the branch
+        repo.checkout("dev");
+
+        # Make a commit on the branch
+        repo.writeFileString("dev-file.txt", "dev content\n");
+        repo.commit("Dev commit");
+
+        # Switch back to the original branch
+        *string orig = repo.branches()[0];
+        if (orig == "dev") {
+            orig = repo.branches()[1];
+        }
+        repo.checkout(orig);
+
+        # Delete the branch
+        repo.deleteBranch("dev");
+        branches = repo.branches();
+        assertFalse(inlist("dev", branches), "dev branch deleted");
+    }
+
+    private testVirtualTags() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        # Lightweight tag
+        repo.createTag("v1.0");
+        list<string> tags = repo.tags();
+        assertEq(1, tags.size(), "1 tag in virtual mode");
+        assertEq("v1.0", tags[0], "tag name correct");
+
+        # Annotated tag
+        repo.createTag("v2.0", "Version 2.0");
+        tags = repo.tags();
+        assertEq(2, tags.size(), "2 tags in virtual mode");
+
+        # Delete
+        repo.deleteTag("v1.0");
+        tags = repo.tags();
+        assertEq(1, tags.size(), "1 tag after delete");
+    }
+
+    private testVirtualCheckout() {
+        Git::GitRepository repo = setupVirtualRepo();
+        # After initial commit, the virtual tree should still have the file
+        assertTrue(repo.fileExists("init.txt"), "init.txt exists in virtual tree");
+
+        # Create branch and add a file
+        repo.createBranch("feature");
+        repo.checkout("feature");
+        repo.writeFileString("feature.txt", "feature content\n");
+        repo.commit("Feature commit");
+
+        # Checkout back - the feature.txt should disappear from virtual tree
+        # (the virtual tree is repopulated from the checked-out commit's tree)
+        *string main_branch;
+        foreach string b in (repo.branches()) {
+            if (b != "feature") {
+                main_branch = b;
+                break;
+            }
+        }
+        assertEq(True, main_branch.val(), "found main branch");
+        repo.checkout(main_branch);
+
+        # The virtual tree should now have the original content
+        assertTrue(repo.fileExists("init.txt"), "init.txt still exists after checkout back");
+        # feature.txt should NOT be in the tree anymore
+        assertFalse(repo.fileExists("feature.txt"), "feature.txt not in main branch");
+    }
+}
