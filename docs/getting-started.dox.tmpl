@@ -1,0 +1,93 @@
+/** @page gitgettingstarted Getting Started
+
+    @tableofcontents
+
+    This page shows the fastest path to working with git repositories from
+    Qore. Both disk-backed and virtual (in-memory) modes are covered.
+
+    @section gitgettingstartedprereqs Prerequisites
+
+    - <b>Qore 2.0+</b> with @c %modern enabled
+    - <b>libgit2</b> installed (the binary module links against it)
+    - The @c git binary module loaded (@c %requires @c git)
+
+    @section gitgettingstarteddisk Disk-Backed Repository
+
+    The example below initializes a repository on disk, creates a file,
+    stages it, and commits.
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::init("/tmp/my-repo");
+    repo.configSet("user.name", "Test User");
+    repo.configSet("user.email", "test@example.com");
+
+    File f();
+    f.open(repo.workdir() + "hello.txt", O_CREAT | O_WRONLY | O_TRUNC);
+    f.write("Hello, World!\n");
+    f.close();
+
+    repo.add("hello.txt");
+    string oid = repo.commit("Initial commit");
+    printf("Commit: %s\n", oid);
+    @endcode
+
+    @section gitgettingstartedvirtual Virtual Repository (In-Memory)
+
+    Virtual repositories store the working tree entirely in memory. Only the
+    git object store uses a temporary directory on disk (cleaned up
+    automatically). This mode is designed for environments without persistent
+    filesystem access.
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Virtual User");
+    repo.configSet("user.email", "virtual@example.com");
+
+    repo.writeFileString("config/app.yaml", "port: 8080\nhost: localhost\n");
+    repo.writeFileString("README.md", "# My Project\n");
+
+    string oid = repo.commit("Add configuration");
+    printf("Commit: %s\n", oid);
+
+    *string content = repo.readFileString("config/app.yaml");
+    printf("Config: %s\n", content);
+    @endcode
+
+    @section gitgettingstartedremote Connecting to a Remote
+
+    Virtual repositories support fetch and push, enabling full remote
+    collaboration without a local working directory.
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Bot");
+    repo.configSet("user.email", "bot@example.com");
+    repo.addRemote("origin", "/path/to/bare/repo.git");
+
+    repo.fetch();
+
+    list<string> remote_branches = repo.branches(True);
+    if (remote_branches) {
+        repo.checkout(remote_branches[0]);
+    }
+
+    *string content = repo.readFileString("config.yaml");
+    printf("Remote config: %s\n", content);
+    @endcode
+
+    @section gitgettingstartednext Where to Go Next
+
+    - @ref gitcookbook -- complete examples for branching, tagging, diffing,
+      data providers, config management, and forge integration
+    - @ref Qore::Git::GitRepository "GitRepository class reference" --
+      full API documentation
+*/

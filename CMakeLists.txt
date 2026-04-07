@@ -72,6 +72,9 @@ set(module_name "git")
 
 set(QORE_DOX_TMPL_SRC
     docs/mainpage.dox.tmpl
+    docs/getting-started.dox.tmpl
+    docs/cookbook.dox.tmpl
+    docs/release-notes.dox.tmpl
 )
 
 if (DEFINED ENV{DOXYGEN_EXECUTABLE})

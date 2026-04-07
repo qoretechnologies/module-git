@@ -1,0 +1,188 @@
+/** @page gitcookbook Cookbook
+
+    @tableofcontents
+
+    This page collects complete code examples for common git module scenarios.
+    For getting started, see @ref gitgettingstarted.
+
+    @section gitcookbookbranch Branch Management
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Test");
+    repo.configSet("user.email", "test@test.com");
+
+    repo.writeFileString("base.txt", "shared content\n");
+    repo.commit("Initial commit");
+
+    # Create and switch to a feature branch
+    repo.createBranch("feature-auth");
+    repo.checkout("feature-auth");
+    repo.writeFileString("auth.txt", "authentication module\n");
+    repo.commit("Add auth module");
+
+    # Switch back to main
+    repo.checkout("main");
+
+    list<string> branches = repo.branches();
+    printf("Branches: %y\n", branches);
+    @endcode
+
+    @section gitcookbookdiff Diff and Log
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Test");
+    repo.configSet("user.email", "test@test.com");
+
+    repo.writeFileString("file.txt", "version 1\n");
+    string oid1 = repo.commit("Version 1");
+
+    repo.writeFileString("file.txt", "version 2\n");
+    repo.writeFileString("new.txt", "new file\n");
+    string oid2 = repo.commit("Version 2");
+
+    # Structured diff
+    list<hash<auto>> changes = repo.diff(oid1, oid2);
+    foreach hash<auto> entry in (changes) {
+        printf("%s: %s\n", entry.status, entry.path);
+    }
+
+    # Patch output
+    string patch = repo.diffPatch(oid1, oid2);
+    printf("%s\n", patch);
+
+    # Commit log
+    list<hash<auto>> commits = repo.log();
+    foreach hash<auto> c in (commits) {
+        printf("%s %s (%s)\n", c.id.substr(0, 8), c.summary, c.author.name);
+    }
+    @endcode
+
+    @section gitcookbooktags Tag Management
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Test");
+    repo.configSet("user.email", "test@test.com");
+
+    repo.writeFileString("app.txt", "v1.0\n");
+    repo.commit("Release 1.0");
+
+    # Annotated tag
+    repo.createTag("v1.0", "Release version 1.0");
+
+    # Lightweight tag
+    repo.createTag("latest");
+
+    list<string> tags = repo.tags();
+    printf("Tags: %y\n", tags);
+    @endcode
+
+    @section gitcookbookfetchpush Fetch and Push (Virtual Mode)
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Bot");
+    repo.configSet("user.email", "bot@example.com");
+    repo.addRemote("origin", "/path/to/bare/repo.git");
+
+    repo.fetch();
+
+    list<string> remote_branches = repo.branches(True);
+    if (remote_branches) {
+        repo.checkout(remote_branches[0]);
+    }
+
+    repo.writeFileString("config.yaml", "updated: true\n");
+    repo.commit("Update config");
+    repo.push();
+    @endcode
+
+    @section gitcookbookconfigmgr GitConfigManager
+
+    @code
+    %modern
+    %requires git
+    %requires GitConfigManager
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    GitConfigManager::GitConfigManager mgr(repo);
+    mgr.setIdentity("ConfigBot", "bot@example.com");
+
+    mgr.writeConfig("config/db.yaml", "host: localhost\nport: 5432\n");
+    mgr.writeConfig("config/app.yaml", "debug: false\n");
+
+    hash<auto> result = mgr.publish("Update database config");
+    printf("Published commit: %s\n", result.id);
+
+    # Environment management
+    mgr.createEnvironment("staging");
+    mgr.switchEnvironment("staging");
+    mgr.writeConfig("config/app.yaml", "debug: true\n");
+    mgr.publish("Enable debug in staging");
+
+    list<hash<auto>> hist = mgr.history(5);
+    foreach hash<auto> c in (hist) {
+        printf("%s: %s\n", c.id.substr(0, 8), c.summary);
+    }
+    @endcode
+
+    @section gitcookbookdataprovider GitDataProvider
+
+    @code
+    %modern
+    %requires git
+    %requires GitDataProvider
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Test");
+    repo.configSet("user.email", "test@test.com");
+    GitDataProvider::GitDataProvider dp(repo);
+
+    AbstractDataProvider writer = dp.getChildProvider("write-file");
+    writer.doRequest({"path": "config.yaml", "content": "key: value\n"});
+
+    AbstractDataProvider committer = dp.getChildProvider("commit");
+    hash<auto> result = committer.doRequest({"message": "Add config"});
+    printf("Commit: %s\n", result.id);
+
+    AbstractDataProvider reader = dp.getChildProvider("read-file");
+    hash<auto> file = reader.doRequest({"path": "config.yaml"});
+    printf("Content: %s\n", file.content);
+    @endcode
+
+    @section gitcookbookforge GitForgeHelper (PR/MR)
+
+    @code
+    %modern
+    %requires GitForgeHelper
+
+    GitForgeHelper::GitForgeHelper gh("github", {
+        "owner": "myorg",
+        "repo": "myrepo",
+        "token": ENV.GITHUB_TOKEN,
+    });
+
+    hash<auto> pr = gh.createPullRequest("feature-branch", "main",
+        "Add new feature", "Detailed description of changes");
+    printf("PR #%d: %s\n", pr.id, pr.url);
+
+    list<hash<auto>> prs = gh.listPullRequests();
+    foreach hash<auto> p in (prs) {
+        printf("#%d: %s (%s -> %s)\n", p.id, p.title, p.head, p.base);
+    }
+    @endcode
+*/
