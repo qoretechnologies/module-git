@@ -32,7 +32,12 @@
 
     @section gitconnectionsintro GitConnections Module Introduction
 
-    The \c GitConnections module provides connection management for git repositories.
+    The \c GitConnections module provides connection management for git repositories,
+    supporting both disk-backed and virtual (in-memory) repository connections.
+
+    Connection schemes:
+    - \c gitlocal:// - for disk-backed repositories (URL is the filesystem path)
+    - \c gitvirtual:// - for virtual/in-memory repositories
 
     @since 1.0
 */
@@ -43,8 +48,127 @@ module GitConnections {
     author = "David Nichols <david@qore.org>";
     url = "http://qore.org";
     license = "MIT";
+    init = sub () {
+        ConnectionSchemeCache::registerScheme("gitlocal", GitLocalConnection::ConnectionScheme);
+        ConnectionSchemeCache::registerScheme("gitvirtual", GitVirtualConnection::ConnectionScheme);
+    };
 }
 
-# placeholder - connection classes will be added in Phase 8
 public namespace GitConnections {
+
+#! Connection for disk-backed git repositories
+/** URL format: \c gitlocal:///path/to/repo
+*/
+public class GitLocalConnection inherits AbstractConnectionWithInfo {
+    public {
+        #! Connection scheme info
+        const ConnectionScheme = <ConnectionSchemeInfo>{
+            "display_name": "Git Local Repository",
+            "short_desc": "A connection to a local git repository on disk",
+            "desc": "Provides a connection to a disk-backed git repository. The URL path "
+                "specifies the filesystem path to the repository.",
+            "cls": Class::forName("GitConnections::GitLocalConnection"),
+            "schemes": {
+                "gitlocal": True,
+            },
+            "options": {},
+        };
+    }
+
+    #! Creates the connection from a hash
+    constructor(hash<auto> config, *hash<auto> attr) : AbstractConnectionWithInfo(config, attr) {
+    }
+
+    #! Creates the connection
+    constructor(string name, string description, string url, hash<auto> attributes = {},
+            hash<auto> options = {}, *Logger logger)
+            : AbstractConnectionWithInfo(name, description, url, attributes, options, logger) {
+    }
+
+    #! Returns the connection type
+    string getType() {
+        return "gitlocal";
+    }
+
+    #! Returns connection scheme info
+    private hash<ConnectionSchemeInfo> getConnectionSchemeInfoImpl() {
+        return ConnectionScheme;
+    }
+
+    #! Returns a GitRepository for this connection
+    private Git::GitRepository getImpl(bool connect = True, *hash<auto> rtopts) {
+        # Parse the path from the URL
+        string path = url;
+        path =~ s/^gitlocal:\/\///;
+        return new Git::GitRepository("/" + path);
+    }
+
+    #! Returns True since this connection type supports the data provider API
+    bool hasDataProvider() {
+        return True;
+    }
+
+    #! Returns a data provider for this connection
+    DataProvider::AbstractDataProvider getDataProvider(*hash<auto> constructor_options) {
+        load_module("GitDataProvider");
+        return create_object("GitDataProvider::GitDataProvider", get());
+    }
+}
+
+#! Connection for virtual/in-memory git repositories
+/** URL format: \c gitvirtual://repo-name
+*/
+public class GitVirtualConnection inherits AbstractConnectionWithInfo {
+    public {
+        #! Connection scheme info
+        const ConnectionScheme = <ConnectionSchemeInfo>{
+            "display_name": "Git Virtual Repository",
+            "short_desc": "A connection to a virtual (in-memory) git repository",
+            "desc": "Provides a connection to a virtual git repository backed by an in-memory "
+                "working tree. Use this for environments without persistent filesystem access.",
+            "cls": Class::forName("GitConnections::GitVirtualConnection"),
+            "schemes": {
+                "gitvirtual": True,
+            },
+            "options": {},
+        };
+    }
+
+    #! Creates the connection from a hash
+    constructor(hash<auto> config, *hash<auto> attr) : AbstractConnectionWithInfo(config, attr) {
+    }
+
+    #! Creates the connection
+    constructor(string name, string description, string url, hash<auto> attributes = {},
+            hash<auto> options = {}, *Logger logger)
+            : AbstractConnectionWithInfo(name, description, url, attributes, options, logger) {
+    }
+
+    #! Returns the connection type
+    string getType() {
+        return "gitvirtual";
+    }
+
+    #! Returns connection scheme info
+    private hash<ConnectionSchemeInfo> getConnectionSchemeInfoImpl() {
+        return ConnectionScheme;
+    }
+
+    #! Returns a virtual GitRepository for this connection
+    private Git::GitRepository getImpl(bool connect = True, *hash<auto> rtopts) {
+        return Git::GitRepository::createVirtual();
+    }
+
+    #! Returns True since this connection type supports the data provider API
+    bool hasDataProvider() {
+        return True;
+    }
+
+    #! Returns a data provider for this connection
+    DataProvider::AbstractDataProvider getDataProvider(*hash<auto> constructor_options) {
+        load_module("GitDataProvider");
+        return create_object("GitDataProvider::GitDataProvider", get());
+    }
+}
+
 }

@@ -32,7 +32,17 @@
 
     @section gitdataproviderintro GitDataProvider Module Introduction
 
-    The \c GitDataProvider module provides a data provider API for git repository operations.
+    The \c GitDataProvider module provides a data provider API for git repository operations,
+    supporting both disk-backed and virtual (in-memory) repositories.
+
+    The following data provider actions are available:
+
+    - \c read-file: Read a file from the repository
+    - \c write-file: Write a file to the repository
+    - \c list-files: List files in the repository
+    - \c commit: Create a commit
+    - \c log: Retrieve commit history
+    - \c status: Get repository status
 
     @since 1.0
 */
@@ -43,8 +53,13 @@ module GitDataProvider {
     author = "David Nichols <david@qore.org>";
     url = "http://qore.org";
     license = "MIT";
+    init = sub () {
+        # Register the data provider factory
+        DataProvider::registerFactory(new GitDataProviderFactory());
+    };
 }
 
-# placeholder - data provider classes will be added in Phase 8
 public namespace GitDataProvider {
+    # App name constant
+    public const AppName = "Git";
 }

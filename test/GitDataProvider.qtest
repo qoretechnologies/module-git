@@ -1,0 +1,179 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitDataProvider.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires GitDataProvider
+%requires QUnit
+
+%exec-class GitDataProviderTest
+
+public class GitDataProviderTest inherits QUnit::Test {
+    constructor() : Test("GitDataProviderTest", "1.0") {
+        addTestCase("factory creates provider", \testFactory());
+        addTestCase("child providers exist", \testChildProviders());
+        addTestCase("write-file action", \testWriteFile());
+        addTestCase("read-file action", \testReadFile());
+        addTestCase("list-files action", \testListFiles());
+        addTestCase("commit action", \testCommit());
+        addTestCase("log action", \testLog());
+        addTestCase("status action", \testStatus());
+        addTestCase("full workflow: write, commit, log, read", \testFullWorkflow());
+
+        set_return_value(main());
+    }
+
+    private testFactory() {
+        GitDataProvider::GitDataProviderFactory factory();
+        hash<auto> info = factory.getInfo();
+        assertEq("git", info.name, "factory name is 'git'");
+    }
+
+    private testChildProviders() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        GitDataProvider::GitDataProvider dp(repo);
+        *list<string> children = dp.getChildProviderNames();
+        assertTrue(children.size() >= 6, "has at least 6 child providers");
+        assertTrue(children.contains("read-file"), "has read-file");
+        assertTrue(children.contains("write-file"), "has write-file");
+        assertTrue(children.contains("list-files"), "has list-files");
+        assertTrue(children.contains("commit"), "has commit");
+        assertTrue(children.contains("log"), "has log");
+        assertTrue(children.contains("status"), "has status");
+    }
+
+    private testWriteFile() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider writer = dp.getChildProvider("write-file");
+
+        hash<auto> result = writer.doRequest({
+            "path": "test.txt",
+            "content": "hello world\n",
+        });
+        assertEq("test.txt", result.path, "write-file returns path");
+        assertEq(12, result.size, "write-file returns correct size");
+    }
+
+    private testReadFile() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider writer = dp.getChildProvider("write-file");
+        AbstractDataProvider reader = dp.getChildProvider("read-file");
+
+        writer.doRequest({"path": "data.txt", "content": "test data\n"});
+
+        hash<auto> result = reader.doRequest({"path": "data.txt"});
+        assertEq("data.txt", result.path, "read-file returns path");
+        assertEq("test data\n", result.content, "read-file returns correct content");
+
+        # Non-existent file
+        hash<auto> missing = reader.doRequest({"path": "nonexistent.txt"});
+        assertNothing(missing.content, "read-file returns NOTHING for missing file");
+    }
+
+    private testListFiles() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider writer = dp.getChildProvider("write-file");
+        AbstractDataProvider lister = dp.getChildProvider("list-files");
+
+        writer.doRequest({"path": "a.txt", "content": "a\n"});
+        writer.doRequest({"path": "b.txt", "content": "b\n"});
+        writer.doRequest({"path": "dir/c.txt", "content": "c\n"});
+
+        hash<auto> result = lister.doRequest({});
+        assertEq(3, result.files.size(), "list-files returns 3 files");
+    }
+
+    private testCommit() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider writer = dp.getChildProvider("write-file");
+        AbstractDataProvider committer = dp.getChildProvider("commit");
+
+        writer.doRequest({"path": "init.txt", "content": "init\n"});
+        hash<auto> result = committer.doRequest({"message": "Initial commit"});
+        assertEq(40, result.id.size(), "commit returns 40-char hex OID");
+    }
+
+    private testLog() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        repo.writeFileString("f.txt", "content\n");
+        repo.commit("First commit");
+
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider logger = dp.getChildProvider("log");
+
+        hash<auto> result = logger.doRequest({});
+        assertEq(1, result.commits.size(), "log returns 1 commit");
+        assertTrue(result.commits[0].summary.find("First commit") >= 0,
+            "log contains commit message");
+    }
+
+    private testStatus() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.writeFileString("staged.txt", "data\n");
+
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider status_dp = dp.getChildProvider("status");
+
+        hash<auto> result = status_dp.doRequest(NOTHING);
+        assertTrue(result.status.hasKey("staged.txt"), "status shows staged file");
+    }
+
+    private testFullWorkflow() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Workflow");
+        repo.configSet("user.email", "workflow@test.com");
+        GitDataProvider::GitDataProvider dp(repo);
+
+        # Write files via data provider
+        AbstractDataProvider writer = dp.getChildProvider("write-file");
+        writer.doRequest({"path": "config.yaml", "content": "key: value\n"});
+        writer.doRequest({"path": "readme.md", "content": "# README\n"});
+
+        # Commit via data provider
+        AbstractDataProvider committer = dp.getChildProvider("commit");
+        hash<auto> commit_result = committer.doRequest({"message": "Add config and readme"});
+        assertEq(40, commit_result.id.size(), "workflow: commit OID valid");
+
+        # Read back via data provider
+        AbstractDataProvider reader = dp.getChildProvider("read-file");
+        hash<auto> read_result = reader.doRequest({"path": "config.yaml"});
+        assertEq("key: value\n", read_result.content, "workflow: read back matches write");
+
+        # Log via data provider
+        AbstractDataProvider logger = dp.getChildProvider("log");
+        hash<auto> log_result = logger.doRequest({"max_count": 5});
+        assertEq(1, log_result.commits.size(), "workflow: 1 commit in log");
+        assertEq("Workflow", log_result.commits[0].author.name,
+            "workflow: author name correct");
+    }
+}
