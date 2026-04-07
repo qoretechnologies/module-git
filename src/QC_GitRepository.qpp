@@ -568,3 +568,79 @@ list<string> tags = repo.tags();
 list<string> GitRepository::tags() {
     return repo->listTags(xsink);
 }
+
+// --- Diff & Log Operations ---
+
+//! Returns a list of diff entries between two refs
+/** If @a from_ref is not provided, diff starts from an empty tree (shows all files).
+    If @a to_ref is not provided, diff is against HEAD.
+
+    @par Example:
+    @code{.py}
+# diff between two branches
+list<hash<auto>> changes = repo.diff("main", "feature");
+for (hash<auto> entry in (changes)) {
+    printf("%s: %s\n", entry.status, entry.path);
+}
+    @endcode
+
+    @param from_ref the starting ref (branch, tag, or commit SHA)
+    @param to_ref the ending ref (default: HEAD)
+
+    @return a list of hashes with keys: \c status (string: "added", "deleted", "modified",
+    "renamed"), \c path (string), and optionally \c old_path (string, for renames)
+
+    @throw GIT-DIFF-ERROR failed to compute diff
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+list<hash<auto>> GitRepository::diff(*string from_ref, *string to_ref) {
+    return repo->diff(from_ref ? from_ref->c_str() : nullptr,
+                      to_ref ? to_ref->c_str() : nullptr, xsink);
+}
+
+//! Returns the diff as a unified patch string
+/** @par Example:
+    @code{.py}
+string patch = repo.diffPatch("main", "feature");
+printf("%s\n", patch);
+    @endcode
+
+    @param from_ref the starting ref
+    @param to_ref the ending ref (default: HEAD)
+
+    @return the diff in unified patch format
+
+    @throw GIT-DIFF-ERROR failed to compute diff
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+string GitRepository::diffPatch(*string from_ref, *string to_ref) {
+    return repo->diffPatch(from_ref ? from_ref->c_str() : nullptr,
+                           to_ref ? to_ref->c_str() : nullptr, xsink);
+}
+
+//! Returns the commit log
+/** @par Example:
+    @code{.py}
+list<hash<auto>> commits = repo.log(10);
+for (hash<auto> c in (commits)) {
+    printf("%s: %s\n", c.id.substr(0, 7), c.summary);
+}
+
+# filter by path
+list<hash<auto>> file_log = repo.log(NOTHING, "config/db.yaml");
+    @endcode
+
+    @param max_count maximum number of commits to return (default: all)
+    @param path optional path filter — only returns commits touching this path
+
+    @return a list of hashes with keys: \c id (string), \c message (string),
+    \c summary (string), \c author (hash with \c name, \c email, \c when),
+    \c parent_count (int)
+
+    @throw GIT-LOG-ERROR failed to traverse log
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+list<hash<auto>> GitRepository::log(*int max_count, *string path) {
+    return repo->log((int)max_count,
+                     path ? path->c_str() : nullptr, xsink);
+}

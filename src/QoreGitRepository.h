@@ -135,6 +135,11 @@ public:
     DLLLOCAL QoreListNode* listBranches(bool remote, ExceptionSink* xsink);
     DLLLOCAL QoreStringNode* currentBranch(ExceptionSink* xsink);
 
+    // --- Diff & Log Operations ---
+    DLLLOCAL QoreListNode* diff(const char* from_ref, const char* to_ref, ExceptionSink* xsink);
+    DLLLOCAL QoreStringNode* diffPatch(const char* from_ref, const char* to_ref, ExceptionSink* xsink);
+    DLLLOCAL QoreListNode* log(int max_count, const char* path, ExceptionSink* xsink);
+
     // --- Tag Operations ---
     DLLLOCAL int createTag(const char* name, const char* message, const char* target_ref,
                            ExceptionSink* xsink);

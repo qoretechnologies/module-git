@@ -1295,3 +1295,294 @@ QoreListNode* QoreGitRepository::listTags(ExceptionSink* xsink) {
     git_strarray_dispose(&tag_names);
     return result.release();
 }
+
+// --- Diff Operations ---
+
+//! Helper to resolve a ref to a tree
+static int resolve_ref_to_tree(git_tree** tree_out, git_repository* repo, const char* ref) {
+    git_object* obj = nullptr;
+    int rc = git_revparse_single(&obj, repo, ref);
+    if (rc < 0) {
+        return rc;
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, repo, git_object_id(obj));
+    git_object_free(obj);
+    if (rc < 0) {
+        return rc;
+    }
+
+    rc = git_commit_tree(tree_out, commit);
+    git_commit_free(commit);
+    return rc;
+}
+
+static const char* delta_status_str(git_delta_t status) {
+    switch (status) {
+        case GIT_DELTA_ADDED: return "added";
+        case GIT_DELTA_DELETED: return "deleted";
+        case GIT_DELTA_MODIFIED: return "modified";
+        case GIT_DELTA_RENAMED: return "renamed";
+        case GIT_DELTA_COPIED: return "copied";
+        case GIT_DELTA_TYPECHANGE: return "typechange";
+        default: return "unknown";
+    }
+}
+
+QoreListNode* QoreGitRepository::diff(const char* from_ref, const char* to_ref,
+                                       ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_tree* from_tree = nullptr;
+    git_tree* to_tree = nullptr;
+
+    // Resolve refs to trees
+    if (from_ref && *from_ref) {
+        int rc = resolve_ref_to_tree(&from_tree, m_repo, from_ref);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve from_ref");
+            return nullptr;
+        }
+    }
+
+    if (to_ref && *to_ref) {
+        int rc = resolve_ref_to_tree(&to_tree, m_repo, to_ref);
+        if (rc < 0) {
+            if (from_tree) {
+                git_tree_free(from_tree);
+            }
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve to_ref");
+            return nullptr;
+        }
+    } else {
+        // Default to HEAD
+        git_reference* head_ref = nullptr;
+        int rc = git_repository_head(&head_ref, m_repo);
+        if (rc == 0) {
+            git_commit* head_commit = nullptr;
+            rc = git_commit_lookup(&head_commit, m_repo, git_reference_target(head_ref));
+            git_reference_free(head_ref);
+            if (rc == 0) {
+                git_commit_tree(&to_tree, head_commit);
+                git_commit_free(head_commit);
+            }
+        }
+    }
+
+    git_diff* git_diff_obj = nullptr;
+    int rc = git_diff_tree_to_tree(&git_diff_obj, m_repo, from_tree, to_tree, nullptr);
+    if (from_tree) {
+        git_tree_free(from_tree);
+    }
+    if (to_tree) {
+        git_tree_free(to_tree);
+    }
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to compute diff");
+        return nullptr;
+    }
+
+    size_t num_deltas = git_diff_num_deltas(git_diff_obj);
+    ReferenceHolder<QoreListNode> result(new QoreListNode(autoHashTypeInfo), xsink);
+
+    for (size_t i = 0; i < num_deltas; i++) {
+        if ((i % 100) == 0 && qore_check_cancel(xsink, "git diff")) {
+            git_diff_free(git_diff_obj);
+            return nullptr;
+        }
+        const git_diff_delta* delta = git_diff_get_delta(git_diff_obj, i);
+
+        ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), xsink);
+        entry->setKeyValue("status", new QoreStringNode(delta_status_str(delta->status)), xsink);
+        entry->setKeyValue("path", new QoreStringNode(delta->new_file.path), xsink);
+        if (delta->old_file.path && strcmp(delta->old_file.path, delta->new_file.path) != 0) {
+            entry->setKeyValue("old_path", new QoreStringNode(delta->old_file.path), xsink);
+        }
+        result->push(entry.release(), xsink);
+    }
+
+    git_diff_free(git_diff_obj);
+    return result.release();
+}
+
+QoreStringNode* QoreGitRepository::diffPatch(const char* from_ref, const char* to_ref,
+                                              ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_tree* from_tree = nullptr;
+    git_tree* to_tree = nullptr;
+
+    if (from_ref && *from_ref) {
+        int rc = resolve_ref_to_tree(&from_tree, m_repo, from_ref);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve from_ref");
+            return nullptr;
+        }
+    }
+
+    if (to_ref && *to_ref) {
+        int rc = resolve_ref_to_tree(&to_tree, m_repo, to_ref);
+        if (rc < 0) {
+            if (from_tree) {
+                git_tree_free(from_tree);
+            }
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve to_ref");
+            return nullptr;
+        }
+    } else {
+        git_reference* head_ref = nullptr;
+        int rc = git_repository_head(&head_ref, m_repo);
+        if (rc == 0) {
+            git_commit* head_commit = nullptr;
+            rc = git_commit_lookup(&head_commit, m_repo, git_reference_target(head_ref));
+            git_reference_free(head_ref);
+            if (rc == 0) {
+                git_commit_tree(&to_tree, head_commit);
+                git_commit_free(head_commit);
+            }
+        }
+    }
+
+    git_diff* git_diff_obj = nullptr;
+    int rc = git_diff_tree_to_tree(&git_diff_obj, m_repo, from_tree, to_tree, nullptr);
+    if (from_tree) {
+        git_tree_free(from_tree);
+    }
+    if (to_tree) {
+        git_tree_free(to_tree);
+    }
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to compute diff");
+        return nullptr;
+    }
+
+    git_buf buf = GIT_BUF_INIT;
+    rc = git_diff_to_buf(&buf, git_diff_obj, GIT_DIFF_FORMAT_PATCH);
+    git_diff_free(git_diff_obj);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to format diff as patch");
+        return nullptr;
+    }
+
+    QoreStringNode* result = new QoreStringNode(buf.ptr, buf.size, QCS_UTF8);
+    git_buf_dispose(&buf);
+    return result;
+}
+
+// --- Log Operations ---
+
+QoreListNode* QoreGitRepository::log(int max_count, const char* path, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_revwalk* walker = nullptr;
+    int rc = git_revwalk_new(&walker, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-LOG-ERROR", rc, "failed to create revision walker");
+        return nullptr;
+    }
+
+    git_revwalk_sorting(walker, GIT_SORT_TIME);
+    rc = git_revwalk_push_head(walker);
+    if (rc < 0) {
+        git_revwalk_free(walker);
+        git_raise_exception(xsink, "GIT-LOG-ERROR", rc, "failed to push HEAD to walker");
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreListNode> result(new QoreListNode(autoHashTypeInfo), xsink);
+    git_oid oid;
+    int count = 0;
+
+    while (git_revwalk_next(&oid, walker) == 0) {
+        if ((++count % 100) == 0 && qore_check_cancel(xsink, "git log")) {
+            git_revwalk_free(walker);
+            return nullptr;
+        }
+        if (max_count > 0 && count > max_count) {
+            break;
+        }
+
+        git_commit* commit = nullptr;
+        rc = git_commit_lookup(&commit, m_repo, &oid);
+        if (rc < 0) {
+            continue;
+        }
+
+        // If path filter is set, check if this commit touches the path
+        if (path && *path) {
+            // Check by diffing against parent
+            bool touches_path = false;
+            unsigned int parent_count = git_commit_parentcount(commit);
+            if (parent_count == 0) {
+                // Root commit — assume it touches everything
+                touches_path = true;
+            } else {
+                git_commit* parent = nullptr;
+                if (git_commit_parent(&parent, commit, 0) == 0) {
+                    git_tree* commit_tree = nullptr;
+                    git_tree* parent_tree = nullptr;
+                    if (git_commit_tree(&commit_tree, commit) == 0 &&
+                        git_commit_tree(&parent_tree, parent) == 0) {
+                        git_diff_options diff_opts;
+                        git_diff_options_init(&diff_opts, GIT_DIFF_OPTIONS_VERSION);
+                        const char* pathspec = path;
+                        diff_opts.pathspec.strings = const_cast<char**>(&pathspec);
+                        diff_opts.pathspec.count = 1;
+
+                        git_diff* d = nullptr;
+                        if (git_diff_tree_to_tree(&d, m_repo, parent_tree, commit_tree, &diff_opts) == 0) {
+                            touches_path = git_diff_num_deltas(d) > 0;
+                            git_diff_free(d);
+                        }
+                        git_tree_free(commit_tree);
+                        git_tree_free(parent_tree);
+                    }
+                    git_commit_free(parent);
+                }
+            }
+
+            if (!touches_path) {
+                git_commit_free(commit);
+                --count;  // don't count filtered commits
+                continue;
+            }
+        }
+
+        char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+        git_oid_tostr(oid_hex, sizeof(oid_hex), &oid);
+
+        const git_signature* author = git_commit_author(commit);
+
+        ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), xsink);
+        entry->setKeyValue("id", new QoreStringNode(oid_hex), xsink);
+        entry->setKeyValue("message", new QoreStringNode(git_commit_message(commit)), xsink);
+        entry->setKeyValue("summary", new QoreStringNode(git_commit_summary(commit)), xsink);
+
+        if (author) {
+            ReferenceHolder<QoreHashNode> author_hash(new QoreHashNode(autoTypeInfo), xsink);
+            author_hash->setKeyValue("name", new QoreStringNode(author->name), xsink);
+            author_hash->setKeyValue("email", new QoreStringNode(author->email), xsink);
+            author_hash->setKeyValue("when", DateTimeNode::makeAbsolute(
+                currentTZ(), (int64)author->when.time, 0), xsink);
+            entry->setKeyValue("author", author_hash.release(), xsink);
+        }
+
+        entry->setKeyValue("parent_count", (int64)git_commit_parentcount(commit), xsink);
+
+        result->push(entry.release(), xsink);
+        git_commit_free(commit);
+    }
+
+    git_revwalk_free(walker);
+    return result.release();
+}

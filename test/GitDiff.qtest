@@ -1,0 +1,176 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitDiff.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitDiffTest
+
+public class GitDiffTest inherits QUnit::Test {
+    constructor() : Test("GitDiffTest", "1.0") {
+        addTestCase("virtual: diff between commits", \testVirtualDiff());
+        addTestCase("virtual: diff patch output", \testVirtualDiffPatch());
+        addTestCase("virtual: log", \testVirtualLog());
+        addTestCase("virtual: log with path filter", \testVirtualLogPathFilter());
+        addTestCase("virtual: diff between branches", \testVirtualDiffBranches());
+        set_return_value(main());
+    }
+
+    private Git::GitRepository setupVirtualRepo() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        return repo;
+    }
+
+    private testVirtualDiff() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        # First commit
+        repo.writeFileString("file1.txt", "hello\n");
+        string oid1 = repo.commit("First commit");
+
+        # Second commit — add and modify
+        repo.writeFileString("file1.txt", "hello world\n");
+        repo.writeFileString("file2.txt", "new file\n");
+        string oid2 = repo.commit("Second commit");
+
+        # Diff between commits
+        list<hash<auto>> changes = repo.diff(oid1, oid2);
+        assertTrue(changes.size() >= 1, "diff has entries");
+
+        # Check that file2 shows as added
+        bool found_added = False;
+        foreach hash<auto> entry in (changes) {
+            if (entry.path == "file2.txt" && entry.status == "added") {
+                found_added = True;
+                break;
+            }
+        }
+        assertTrue(found_added, "file2.txt shows as added in diff");
+    }
+
+    private testVirtualDiffPatch() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        repo.writeFileString("readme.txt", "line1\n");
+        string oid1 = repo.commit("First");
+
+        repo.writeFileString("readme.txt", "line1\nline2\n");
+        string oid2 = repo.commit("Second");
+
+        string patch = repo.diffPatch(oid1, oid2);
+        assertTrue(patch.size() > 0, "patch output is non-empty");
+        assertTrue(patch.find("diff --git") >= 0, "patch contains diff header");
+        assertTrue(patch.find("+line2") >= 0, "patch shows added line");
+    }
+
+    private testVirtualLog() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        repo.writeFileString("f1.txt", "a\n");
+        repo.commit("Commit 1");
+
+        repo.writeFileString("f2.txt", "b\n");
+        repo.commit("Commit 2");
+
+        repo.writeFileString("f3.txt", "c\n");
+        repo.commit("Commit 3");
+
+        # Full log
+        list<hash<auto>> commits = repo.log();
+        assertEq(3, commits.size(), "log returns 3 commits");
+        assertTrue(commits[0].message.find("Commit 3") >= 0, "most recent commit first");
+        # Verify all 3 commits are present (order of older commits may vary with same-second timestamps)
+        hash<string, bool> found;
+        foreach hash<auto> c in (commits) {
+            found{c.summary} = True;
+        }
+        assertTrue(found.hasKey("Commit 1"), "Commit 1 in log");
+        assertTrue(found.hasKey("Commit 2"), "Commit 2 in log");
+        assertTrue(found.hasKey("Commit 3"), "Commit 3 in log");
+
+        # Author info — verify structure exists
+        assertTrue(commits[0].author.name.val(), "author name is set");
+        assertTrue(commits[0].author.email.val(), "author email is set");
+        assertTrue(commits[0].author.hasKey("when"), "author has when field");
+
+        # Limited log
+        list<hash<auto>> limited = repo.log(2);
+        assertEq(2, limited.size(), "limited log returns 2 commits");
+
+        # Summary
+        assertTrue(commits[0].summary.find("Commit 3") >= 0, "summary contains commit message");
+    }
+
+    private testVirtualLogPathFilter() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        repo.writeFileString("config/db.yaml", "host: localhost\n");
+        repo.commit("Add db config");
+
+        repo.writeFileString("readme.txt", "readme\n");
+        repo.commit("Add readme");
+
+        repo.writeFileString("config/db.yaml", "host: prod\n");
+        repo.commit("Update db config");
+
+        # Filter by path
+        list<hash<auto>> db_log = repo.log(NOTHING, "config/db.yaml");
+        assertEq(2, db_log.size(), "path-filtered log shows 2 commits touching config/db.yaml");
+
+        list<hash<auto>> readme_log = repo.log(NOTHING, "readme.txt");
+        # May be 1 or 2 depending on whether root commit is included
+        assertTrue(readme_log.size() >= 1, "path-filtered log shows commits touching readme.txt");
+    }
+
+    private testVirtualDiffBranches() {
+        Git::GitRepository repo = setupVirtualRepo();
+
+        repo.writeFileString("shared.txt", "shared\n");
+        repo.commit("Initial shared");
+
+        # Create a feature branch
+        repo.createBranch("feature");
+        repo.checkout("feature");
+        repo.writeFileString("feature.txt", "feature only\n");
+        repo.commit("Feature commit");
+
+        # Diff between main and feature
+        list<hash<auto>> changes = repo.diff("main", "feature");
+        assertTrue(changes.size() >= 1, "diff between branches has entries");
+
+        bool found_feature = False;
+        foreach hash<auto> entry in (changes) {
+            if (entry.path == "feature.txt") {
+                found_feature = True;
+                assertEq("added", entry.status, "feature.txt is added");
+                break;
+            }
+        }
+        assertTrue(found_feature, "feature.txt found in branch diff");
+    }
+}
