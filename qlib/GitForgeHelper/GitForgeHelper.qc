@@ -45,7 +45,7 @@ public class GitForgeHelper {
         string forge_type;
 
         #! REST client for API calls (created lazily)
-        *RestClient::RestClient rest;
+        *RestClientIo::RestClientIo rest;
 
         #! REST client configuration
         hash<auto> rest_config;
@@ -92,7 +92,7 @@ public class GitForgeHelper {
         if (forge_type == FORGE_GITHUB) {
             rest_config = {
                 "url": "https://api.github.com",
-                "additional_headers": {
+                "headers": {
                     "Authorization": "Bearer " + opts.token,
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2022-11-28",
@@ -102,7 +102,7 @@ public class GitForgeHelper {
             string url = opts.url ?? "https://gitlab.com";
             rest_config = {
                 "url": url + "/api/v4",
-                "additional_headers": {
+                "headers": {
                     "PRIVATE-TOKEN": opts.token,
                 },
             };
@@ -113,11 +113,11 @@ public class GitForgeHelper {
     }
 
     #! Returns the REST client, creating it on first use (thread-safe)
-    private RestClient::RestClient getRestClient() {
+    private RestClientIo::RestClientIo getRestClient() {
         if (!rest) {
             AutoLock al(rest_mutex);
             if (!rest) {
-                rest = new RestClient::RestClient(rest_config);
+                rest = new RestClientIo::RestClientIo(rest_config);
             }
         }
         return rest;
