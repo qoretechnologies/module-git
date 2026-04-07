@@ -5,9 +5,18 @@
     @section gitintro Git Module Introduction
 
     The \c git module provides a comprehensive interface to git repositories from
-    %Qore using the libgit2 library. It supports all common git operations including
-    repository management, staging, committing, branching, tagging, diffing, merging,
-    and remote operations.
+    %Qore using the libgit2 library. It supports both **disk-backed** and
+    **virtual (in-memory)** repositories, enabling git operations in environments
+    without persistent filesystem access.
+
+    Key features:
+    - Repository management (init, open, virtual/in-memory)
+    - Virtual filesystem API (readFile, writeFile, deleteFile, listFiles)
+    - Staging and committing
+    - Branch and tag operations
+    - Diff, log, and status
+    - Remote operations (fetch, push)
+    - Cooperative cancellation support for all long-running operations
 
     This module is released under the MIT license (see \c COPYING.MIT in the source
     distribution for more information). The module is tagged as such in the module's
@@ -27,19 +36,27 @@
     The following classes are provided by this module:
     - @ref Qore::Git::GitRepository "GitRepository": main class for interacting with git repositories
 
+    @section gitusermodules User Modules
+
+    The following user modules build on the binary git module:
+    - \c GitDataProvider: data provider API for git repository operations
+    - \c GitConnections: connection management (gitlocal:// and gitvirtual:// schemes)
+    - \c GitConfigManager: high-level configuration management with observer pattern
+    - \c GitForgeHelper: GitHub/GitLab pull request and merge request management
+
     @section gitexamples Examples
 
-    @par Example: Initialize a repository and create a commit
+    @subsection gitex_disk Example: Disk-Backed Repository
     @code{.py}
 %modern
 %requires git
 
-# initialize a new repo
-GitRepository repo = GitRepository::init("/tmp/test-repo");
+# Initialize a new repo
+Git::GitRepository repo = Git::GitRepository::init("/tmp/test-repo");
 repo.configSet("user.name", "Test User");
 repo.configSet("user.email", "test@example.com");
 
-# create a file and commit
+# Create a file and commit
 File f();
 f.open(repo.workdir() + "hello.txt", O_CREAT | O_WRONLY | O_TRUNC);
 f.write("Hello, World!\n");
@@ -50,8 +67,236 @@ string oid = repo.commit("Initial commit");
 printf("Commit: %s\n", oid);
     @endcode
 
+    @subsection gitex_virtual Example: Virtual Repository (In-Memory)
+    @code{.py}
+%modern
+%requires git
+
+# Create a virtual repo (no filesystem needed)
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Virtual User");
+repo.configSet("user.email", "virtual@example.com");
+
+# Write files to the in-memory tree
+repo.writeFileString("config/app.yaml", "port: 8080\nhost: localhost\n");
+repo.writeFileString("README.md", "# My Project\n");
+
+# Commit
+string oid = repo.commit("Add configuration");
+printf("Virtual commit: %s\n", oid);
+
+# Read back
+*string content = repo.readFileString("config/app.yaml");
+printf("Config: %s\n", content);
+
+# List all files
+list<string> files = repo.listFiles();
+printf("Files: %y\n", files);
+    @endcode
+
+    @subsection gitex_branch Example: Branch Management
+    @code{.py}
+%modern
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Test");
+repo.configSet("user.email", "test@test.com");
+
+# Initial commit on main
+repo.writeFileString("base.txt", "shared content\n");
+repo.commit("Initial commit");
+
+# Create and switch to a feature branch
+repo.createBranch("feature-auth");
+repo.checkout("feature-auth");
+repo.writeFileString("auth.txt", "authentication module\n");
+repo.commit("Add auth module");
+
+# Switch back to main
+repo.checkout("main");
+
+# List branches
+list<string> branches = repo.branches();
+printf("Branches: %y\n", branches);
+    @endcode
+
+    @subsection gitex_fetchpush Example: Fetch and Push (Virtual Mode)
+    @code{.py}
+%modern
+%requires git
+
+# Create a virtual repo connected to a remote
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Bot");
+repo.configSet("user.email", "bot@example.com");
+repo.addRemote("origin", "/path/to/bare/repo.git");
+
+# Fetch from remote
+repo.fetch();
+
+# Checkout the remote branch
+list<string> remote_branches = repo.branches(True);
+if (remote_branches) {
+    repo.checkout(remote_branches[0]);
+}
+
+# Read files from the fetched tree
+*string content = repo.readFileString("config.yaml");
+printf("Remote config: %s\n", content);
+
+# Modify and push back
+repo.writeFileString("config.yaml", "updated: true\n");
+repo.commit("Update config");
+repo.push();
+    @endcode
+
+    @subsection gitex_diff Example: Diff and Log
+    @code{.py}
+%modern
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Test");
+repo.configSet("user.email", "test@test.com");
+
+repo.writeFileString("file.txt", "version 1\n");
+string oid1 = repo.commit("Version 1");
+
+repo.writeFileString("file.txt", "version 2\n");
+repo.writeFileString("new.txt", "new file\n");
+string oid2 = repo.commit("Version 2");
+
+# Structured diff
+list<hash<auto>> changes = repo.diff(oid1, oid2);
+foreach hash<auto> entry in (changes) {
+    printf("%s: %s\n", entry.status, entry.path);
+}
+
+# Patch output
+string patch = repo.diffPatch(oid1, oid2);
+printf("%s\n", patch);
+
+# Commit log
+list<hash<auto>> commits = repo.log();
+foreach hash<auto> c in (commits) {
+    printf("%s %s (%s)\n", c.id.substr(0, 8), c.summary, c.author.name);
+}
+    @endcode
+
+    @subsection gitex_tags Example: Tag Management
+    @code{.py}
+%modern
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Test");
+repo.configSet("user.email", "test@test.com");
+
+repo.writeFileString("app.txt", "v1.0\n");
+repo.commit("Release 1.0");
+
+# Create an annotated tag
+repo.createTag("v1.0", "Release version 1.0");
+
+# Create a lightweight tag
+repo.createTag("latest");
+
+list<string> tags = repo.tags();
+printf("Tags: %y\n", tags);
+    @endcode
+
+    @subsection gitex_configmgr Example: GitConfigManager
+    @code{.py}
+%modern
+%requires git
+%requires GitConfigManager
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+GitConfigManager::GitConfigManager mgr(repo);
+mgr.setIdentity("ConfigBot", "bot@example.com");
+
+# Write config files
+mgr.writeConfig("config/db.yaml", "host: localhost\nport: 5432\n");
+mgr.writeConfig("config/app.yaml", "debug: false\n");
+
+# Publish (commit + push)
+hash<auto> result = mgr.publish("Update database config");
+printf("Published commit: %s\n", result.id);
+
+# Environment management
+mgr.createEnvironment("staging");
+mgr.switchEnvironment("staging");
+mgr.writeConfig("config/app.yaml", "debug: true\n");
+mgr.publish("Enable debug in staging");
+
+# View history
+list<hash<auto>> hist = mgr.history(5);
+foreach hash<auto> c in (hist) {
+    printf("%s: %s\n", c.id.substr(0, 8), c.summary);
+}
+    @endcode
+
+    @subsection gitex_dataprovider Example: GitDataProvider
+    @code{.py}
+%modern
+%requires git
+%requires GitDataProvider
+
+# Create a data provider from a virtual repo
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Test");
+repo.configSet("user.email", "test@test.com");
+GitDataProvider::GitDataProvider dp(repo);
+
+# Write files via data provider
+AbstractDataProvider writer = dp.getChildProvider("write-file");
+writer.doRequest({"path": "config.yaml", "content": "key: value\n"});
+
+# Commit via data provider
+AbstractDataProvider committer = dp.getChildProvider("commit");
+hash<auto> result = committer.doRequest({"message": "Add config"});
+printf("Commit: %s\n", result.id);
+
+# Read back via data provider
+AbstractDataProvider reader = dp.getChildProvider("read-file");
+hash<auto> file = reader.doRequest({"path": "config.yaml"});
+printf("Content: %s\n", file.content);
+    @endcode
+
+    @subsection gitex_forge Example: GitForgeHelper (PR/MR)
+    @code{.py}
+%modern
+%requires GitForgeHelper
+
+# GitHub PR management
+GitForgeHelper::GitForgeHelper gh("github", {
+    "owner": "myorg",
+    "repo": "myrepo",
+    "token": ENV.GITHUB_TOKEN,
+});
+
+# Create a pull request
+hash<auto> pr = gh.createPullRequest("feature-branch", "main",
+    "Add new feature", "Detailed description of changes");
+printf("PR #%d: %s\n", pr.id, pr.url);
+
+# List open PRs
+list<hash<auto>> prs = gh.listPullRequests();
+foreach hash<auto> p in (prs) {
+    printf("#%d: %s (%s -> %s)\n", p.id, p.title, p.head, p.base);
+}
+    @endcode
+
     @section gitreleasenotes Release Notes
 
     @subsection git_1_0 git Module Version 1.0
-    - initial release
+    - initial release with dual-mode repository support (disk-backed and virtual)
+    - virtual filesystem API for in-memory file operations
+    - branch, tag, diff, log, and status operations
+    - remote operations (fetch, push) with cooperative cancellation
+    - GitDataProvider module with DPAT_API actions
+    - GitConnections module (gitlocal:// and gitvirtual:// schemes)
+    - GitConfigManager module with observer pattern support
+    - GitForgeHelper module for GitHub/GitLab PR/MR management
 */
