@@ -56,10 +56,124 @@ module GitDataProvider {
     init = sub () {
         # Register the data provider factory
         DataProvider::registerFactory(new GitDataProviderFactory());
+
+        # Register the Git app
+        DataProviderActionCatalog::registerApp(<DataProviderAppInfo>{
+            "name": AppName,
+            "display_name": "Git",
+            "short_desc": "Git repository operations",
+            "desc": "Provides integration with Git repositories for managing files, commits, "
+                "and repository operations.\n\n"
+                "**Features:**\n"
+                "- Read and write files in the repository\n"
+                "- Create commits from staged changes\n"
+                "- Browse commit history with optional path filtering\n"
+                "- List files and check repository status\n"
+                "- Supports both disk-backed and virtual (in-memory) repositories",
+            "logo": GitLogo,
+            "logo_file_name": "git-logo.svg",
+            "logo_mime_type": MimeTypeSvg,
+            "groups": (DataProvider::AppGroup::VersionControl,),
+        });
+
+        # Register read-file action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/read-file",
+            "action": "read-file",
+            "action_code": DPAT_API,
+            "display_name": "Read File",
+            "short_desc": "Read a file from the repository",
+            "desc": "Reads a file from the git repository's virtual tree or HEAD commit "
+                "and returns its content as a string",
+            "options": DataProviderActionCatalog::getActionOptionFromFields(
+                GitReadFileRequestDataType::Fields{"path",},
+                {"preselected": True, "required": True},
+            ),
+            "output_type": new GitReadFileResponseDataType(),
+        });
+
+        # Register write-file action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/write-file",
+            "action": "write-file",
+            "action_code": DPAT_API,
+            "display_name": "Write File",
+            "short_desc": "Write a file to the repository",
+            "desc": "Writes a file to the git repository's virtual tree, staging it for "
+                "the next commit",
+            "options": DataProviderActionCatalog::getActionOptionFromFields(
+                GitWriteFileRequestDataType::Fields{"path", "content",},
+                {"preselected": True, "required": True},
+            ),
+            "output_type": new GitWriteFileResponseDataType(),
+        });
+
+        # Register list-files action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/list-files",
+            "action": "list-files",
+            "action_code": DPAT_API,
+            "display_name": "List Files",
+            "short_desc": "List files in the repository",
+            "desc": "Lists all files in the git repository's virtual tree and HEAD commit",
+            "output_type": new GitListFilesResponseDataType(),
+        });
+
+        # Register commit action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/commit",
+            "action": "commit",
+            "action_code": DPAT_API,
+            "display_name": "Create Commit",
+            "short_desc": "Create a commit from staged changes",
+            "desc": "Creates a commit from all staged/written files in the git repository",
+            "options": DataProviderActionCatalog::getActionOptionFromFields(
+                GitCommitRequestDataType::Fields{"message",},
+                {"preselected": True, "required": True},
+            ),
+            "output_type": new GitCommitResponseDataType(),
+        });
+
+        # Register log action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/log",
+            "action": "log",
+            "action_code": DPAT_API,
+            "display_name": "View Commit Log",
+            "short_desc": "Retrieve commit history",
+            "desc": "Retrieves commit history from the git repository, optionally filtered "
+                "by path and limited by count",
+            "options": DataProviderActionCatalog::getActionOptionFromFields(
+                GitLogRequestDataType::Fields,
+            ),
+            "output_type": new GitLogResponseDataType(),
+        });
+
+        # Register status action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/status",
+            "action": "status",
+            "action_code": DPAT_API,
+            "display_name": "Repository Status",
+            "short_desc": "Get repository status",
+            "desc": "Returns the status of the git repository showing staged, modified, "
+                "and untracked files",
+            "output_type": new GitStatusResponseDataType(),
+        });
     };
 }
 
 public namespace GitDataProvider {
     # App name constant
     public const AppName = "Git";
+
+    # Git logo loaded from file at module level
+    public const GitLogo = Qore::ReadOnlyFile::readTextFile(
+        get_script_dir() + "/git-logo.svg");
 }

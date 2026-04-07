@@ -27,13 +27,29 @@
 
 #include "QoreGitRepository.h"
 
+#include <qore/QoreSandboxManager.h>
+
 #include <cstring>
 #include <sys/stat.h>
+
+//! Helper to check filesystem sandbox access
+static bool checkFsAccess(const char* path, int mode, ExceptionSink* xsink) {
+    QoreSandboxManagerHelper smh;
+    if (smh) {
+        if (!smh->filesystem().checkAccess(path, mode, xsink)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // --- Constructors ---
 
 QoreGitRepository::QoreGitRepository(const char* path, ExceptionSink* xsink)
     : m_path(path), m_virtual(false) {
+    if (!checkFsAccess(path, QSEC_READ, xsink)) {
+        return;
+    }
     int rc = git_repository_open(&m_repo, path);
     if (rc < 0) {
         git_raise_exception(xsink, "GIT-REPOSITORY-OPEN-ERROR", rc, "failed to open git repository");
@@ -42,6 +58,9 @@ QoreGitRepository::QoreGitRepository(const char* path, ExceptionSink* xsink)
 
 QoreGitRepository::QoreGitRepository(const char* path, bool bare, ExceptionSink* xsink)
     : m_path(path), m_virtual(false) {
+    if (!checkFsAccess(path, QSEC_CREATE | QSEC_WRITE, xsink)) {
+        return;
+    }
     int rc = git_repository_init(&m_repo, path, bare ? 1 : 0);
     if (rc < 0) {
         git_raise_exception(xsink, "GIT-REPOSITORY-INIT-ERROR", rc, "failed to initialize git repository");
@@ -310,6 +329,11 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
         if (workdir) {
             std::string full_path = std::string(workdir) + path;
 
+            // Sandbox check before writing to disk
+            if (!checkFsAccess(full_path.c_str(), QSEC_WRITE | QSEC_CREATE, xsink)) {
+                return -1;
+            }
+
             // Ensure parent directory exists
             std::string dir = full_path.substr(0, full_path.rfind('/'));
             if (!dir.empty()) {
@@ -364,6 +388,9 @@ int QoreGitRepository::deleteFile(const char* path, ExceptionSink* xsink) {
         const char* workdir = git_repository_workdir(m_repo);
         if (workdir) {
             std::string full_path = std::string(workdir) + path;
+            if (!checkFsAccess(full_path.c_str(), QSEC_DELETE, xsink)) {
+                return -1;
+            }
             ::remove(full_path.c_str());
         }
         git_index* index = nullptr;
@@ -1576,6 +1603,12 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
         return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
     }
 
+    // Pre-operation cancel check before blocking network I/O
+    if (qore_check_cancel(xsink, "git fetch")) {
+        git_remote_free(remote);
+        return -1;
+    }
+
     git_fetch_options opts;
     git_fetch_options_init(&opts, GIT_FETCH_OPTIONS_VERSION);
     opts.callbacks.transfer_progress = qore_git_transfer_progress_cb;
@@ -1605,6 +1638,12 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
     int rc = git_remote_lookup(&remote, m_repo, rname);
     if (rc < 0) {
         return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
+    }
+
+    // Pre-operation cancel check before blocking network I/O
+    if (qore_check_cancel(xsink, "git push")) {
+        git_remote_free(remote);
+        return -1;
     }
 
     git_push_options opts;
