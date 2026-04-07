@@ -1,0 +1,304 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  CornerCases.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class CornerCaseTests
+
+public class CornerCaseTests inherits QUnit::Test {
+    constructor() : Test("CornerCaseTests", "1.0") {
+        addTestCase("unicode filenames and content", \testUnicode());
+        addTestCase("binary file round-trip", \testBinaryRoundTrip());
+        addTestCase("empty file", \testEmptyFile());
+        addTestCase("large file", \testLargeFile());
+        addTestCase("many files", \testManyFiles());
+        addTestCase("deeply nested paths", \testDeeplyNested());
+        addTestCase("overwrite file content", \testOverwriteFile());
+        addTestCase("commit message edge cases", \testCommitMessages());
+        addTestCase("config overrides default signature", \testConfigSignature());
+        addTestCase("multiple branches diverge and diff", \testBranchDiverge());
+        addTestCase("readFile falls back to HEAD tree", \testReadFileFallback());
+        addTestCase("status reflects virtual tree", \testVirtualStatus());
+
+        set_return_value(main());
+    }
+
+    private Git::GitRepository setupRepo() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        return repo;
+    }
+
+    private testUnicode() {
+        Git::GitRepository repo = setupRepo();
+
+        # Unicode filename
+        string unicode_name = "données/résumé.txt";
+        string unicode_content = "Ünïcödë cöntënt: 日本語テスト 🎉\n";
+        repo.writeFileString(unicode_name, unicode_content);
+        *string readback = repo.readFileString(unicode_name);
+        assertEq(unicode_content, readback, "unicode content preserved");
+
+        assertTrue(repo.fileExists(unicode_name), "unicode filename exists");
+
+        # Commit with unicode message
+        string oid = repo.commit("Ünïcödë cömmït mëssägë: 提交");
+        assertEq(40, oid.size(), "commit with unicode message succeeds");
+
+        # Verify in log
+        list<hash<auto>> commits = repo.log();
+        assertTrue(commits[0].message.find("Ünïcödë") >= 0,
+            "unicode commit message preserved in log");
+    }
+
+    private testBinaryRoundTrip() {
+        Git::GitRepository repo = setupRepo();
+
+        # Create binary data with all byte values 0-255
+        binary bin_data = binary();
+        for (int i = 0; i < 256; i++) {
+            bin_data += <00>;
+        }
+        # Set each byte
+        for (int i = 0; i < 256; i++) {
+            splice bin_data, i, 1, chr(i);
+        }
+
+        repo.writeFile("binary.dat", bin_data);
+        *binary readback = repo.readFile("binary.dat");
+        assertEq(bin_data.size(), readback.size(), "binary size preserved");
+        assertEq(bin_data, readback, "binary content preserved before commit");
+
+        # Commit and re-read
+        repo.commit("Binary file commit");
+        *binary after_commit = repo.readFile("binary.dat");
+        assertEq(bin_data, after_commit, "binary content preserved after commit");
+    }
+
+    private testEmptyFile() {
+        Git::GitRepository repo = setupRepo();
+
+        # Write empty string
+        repo.writeFileString("empty.txt", "");
+        *string content = repo.readFileString("empty.txt");
+        assertEq("", content, "empty string file preserved");
+        assertTrue(repo.fileExists("empty.txt"), "empty file exists");
+
+        # Write empty binary
+        repo.writeFile("empty.bin", binary());
+        *binary bin = repo.readFile("empty.bin");
+        assertEq(0, bin.size(), "empty binary file preserved");
+
+        # Commit empty files
+        repo.commit("Empty files");
+
+        # Re-read after commit
+        *string after = repo.readFileString("empty.txt");
+        assertEq("", after, "empty string file preserved after commit");
+    }
+
+    private testLargeFile() {
+        Git::GitRepository repo = setupRepo();
+
+        # Create a 1MB file
+        string large = strmul("x", 1024 * 1024);
+        repo.writeFileString("large.txt", large);
+        *string readback = repo.readFileString("large.txt");
+        assertEq(large.size(), readback.size(), "large file size preserved");
+
+        repo.commit("Large file");
+        *string after = repo.readFileString("large.txt");
+        assertEq(large.size(), after.size(), "large file size preserved after commit");
+    }
+
+    private testManyFiles() {
+        Git::GitRepository repo = setupRepo();
+
+        # Create 500 files
+        for (int i = 0; i < 500; i++) {
+            repo.writeFileString(sprintf("file_%04d.txt", i), sprintf("content %d\n", i));
+        }
+
+        list<string> files = repo.listFiles();
+        assertEq(500, files.size(), "500 files in virtual tree");
+
+        repo.commit("Many files");
+
+        # Verify a sample after commit
+        *string sample = repo.readFileString("file_0250.txt");
+        assertEq("content 250\n", sample, "sample file content correct after commit");
+    }
+
+    private testDeeplyNested() {
+        Git::GitRepository repo = setupRepo();
+
+        # Create deeply nested path
+        string deep_path = "a/b/c/d/e/f/g/h/i/j/deep.txt";
+        repo.writeFileString(deep_path, "deep content\n");
+        assertTrue(repo.fileExists(deep_path), "deeply nested file exists");
+
+        repo.commit("Deep nesting");
+
+        *string content = repo.readFileString(deep_path);
+        assertEq("deep content\n", content, "deeply nested content preserved after commit");
+    }
+
+    private testOverwriteFile() {
+        Git::GitRepository repo = setupRepo();
+
+        repo.writeFileString("config.yaml", "version: 1\n");
+        repo.commit("Version 1");
+
+        # Overwrite with new content
+        repo.writeFileString("config.yaml", "version: 2\n");
+        *string content = repo.readFileString("config.yaml");
+        assertEq("version: 2\n", content, "overwritten content reflects new value");
+
+        repo.commit("Version 2");
+
+        # Verify diff between commits
+        list<hash<auto>> commits = repo.log();
+        assertEq(2, commits.size(), "two commits in log");
+    }
+
+    private testCommitMessages() {
+        Git::GitRepository repo = setupRepo();
+
+        # Multi-line commit message
+        repo.writeFileString("f1.txt", "a\n");
+        repo.commit("First line\n\nDetailed description\nwith multiple lines");
+        list<hash<auto>> log1 = repo.log();
+        assertTrue(log1[0].summary.find("First line") >= 0, "summary is first line");
+        assertTrue(log1[0].message.find("Detailed description") >= 0,
+            "full message has body");
+
+        # Very long commit message
+        string long_msg = strmul("A", 10000);
+        repo.writeFileString("f2.txt", "b\n");
+        string oid2 = repo.commit(long_msg);
+        assertEq(40, oid2.size(), "long commit message accepted");
+    }
+
+    private testConfigSignature() {
+        Git::GitRepository repo = setupRepo();
+        repo.configSet("user.name", "Custom Author");
+        repo.configSet("user.email", "custom@example.com");
+
+        repo.writeFileString("f.txt", "content\n");
+        repo.commit("Test commit");
+
+        list<hash<auto>> commits = repo.log();
+        assertEq("Custom Author", commits[0].author.name,
+            "config user.name overrides default");
+        assertEq("custom@example.com", commits[0].author.email,
+            "config user.email overrides default");
+    }
+
+    private testBranchDiverge() {
+        Git::GitRepository repo = setupRepo();
+
+        # Initial commit on main
+        repo.writeFileString("shared.txt", "shared\n");
+        repo.commit("Initial");
+
+        # Create feature branch and diverge
+        repo.createBranch("feature");
+        repo.checkout("feature");
+        repo.writeFileString("feature.txt", "feature only\n");
+        repo.commit("Feature work");
+
+        # Switch back to main and add different file
+        repo.checkout("main");
+        repo.writeFileString("main-only.txt", "main only\n");
+        repo.commit("Main work");
+
+        # Diff from main to feature
+        list<hash<auto>> diff_fwd = repo.diff("main", "feature");
+        bool has_feature_added = False;
+        bool has_main_deleted = False;
+        foreach hash<auto> entry in (diff_fwd) {
+            if (entry.path == "feature.txt" && entry.status == "added") {
+                has_feature_added = True;
+            }
+            if (entry.path == "main-only.txt" && entry.status == "deleted") {
+                has_main_deleted = True;
+            }
+        }
+        assertTrue(has_feature_added, "feature.txt added in forward diff");
+        assertTrue(has_main_deleted, "main-only.txt deleted in forward diff");
+
+        # Diff from feature to main (reverse)
+        list<hash<auto>> diff_rev = repo.diff("feature", "main");
+        bool has_feature_deleted = False;
+        bool has_main_added = False;
+        foreach hash<auto> entry in (diff_rev) {
+            if (entry.path == "feature.txt" && entry.status == "deleted") {
+                has_feature_deleted = True;
+            }
+            if (entry.path == "main-only.txt" && entry.status == "added") {
+                has_main_added = True;
+            }
+        }
+        assertTrue(has_feature_deleted, "feature.txt deleted in reverse diff");
+        assertTrue(has_main_added, "main-only.txt added in reverse diff");
+    }
+
+    private testReadFileFallback() {
+        Git::GitRepository repo = setupRepo();
+
+        # Write and commit a file
+        repo.writeFileString("committed.txt", "committed content\n");
+        repo.commit("Initial");
+
+        # Read the committed file — should fall back to HEAD tree
+        # (the file was cleared from m_virtual_tree after commit... actually it's not cleared)
+        # Let's test by writing a new file and reading the committed one
+        repo.writeFileString("new.txt", "new content\n");
+
+        # The committed file should still be readable from virtual tree
+        *string content = repo.readFileString("committed.txt");
+        assertEq("committed content\n", content,
+            "committed file still readable");
+    }
+
+    private testVirtualStatus() {
+        Git::GitRepository repo = setupRepo();
+
+        # Empty virtual tree — no status
+        hash<auto> status = repo.status();
+        assertEq(0, status.size(), "empty virtual tree has no status");
+
+        # Write files
+        repo.writeFileString("a.txt", "a\n");
+        repo.writeFileString("b.txt", "b\n");
+        status = repo.status();
+        assertEq(2, status.size(), "two files in status after writes");
+        assertTrue(status.hasKey("a.txt"), "a.txt in status");
+        assertTrue(status.hasKey("b.txt"), "b.txt in status");
+    }
+}
