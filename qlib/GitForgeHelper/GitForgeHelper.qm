@@ -33,7 +33,22 @@
     @section gitforgehelperintro GitForgeHelper Module Introduction
 
     The \c GitForgeHelper module provides integration with GitHub and GitLab for
-    pull request and merge request management.
+    pull request and merge request management via their REST APIs.
+
+    Supported forges:
+    - GitHub (api.github.com)
+    - GitLab (configurable instance URL)
+
+    @par Example:
+    @code{.py}
+GitForgeHelper helper("github", {
+    "owner": "myorg",
+    "repo": "myrepo",
+    "token": ENV.GITHUB_TOKEN,
+});
+hash<auto> pr = helper.createPullRequest("feature-branch", "main",
+    "Add new feature", "Description of changes");
+    @endcode
 
     @since 1.0
 */
@@ -46,6 +61,8 @@ module GitForgeHelper {
     license = "MIT";
 }
 
-# placeholder - forge helper classes will be added in Phase 10
 public namespace GitForgeHelper {
+    #! Forge type constants
+    public const FORGE_GITHUB = "github";
+    public const FORGE_GITLAB = "gitlab";
 }
