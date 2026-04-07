@@ -1,0 +1,177 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitConfigManager.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires GitConfigManager
+%requires QUnit
+
+%exec-class GitConfigManagerTest
+
+public class GitConfigManagerTest inherits QUnit::Test {
+    constructor() : Test("GitConfigManagerTest", "1.0") {
+        addTestCase("read/write config", \testReadWriteConfig());
+        addTestCase("delete config", \testDeleteConfig());
+        addTestCase("list configs", \testListConfigs());
+        addTestCase("publish (commit)", \testPublish());
+        addTestCase("environments (branches)", \testEnvironments());
+        addTestCase("history", \testHistory());
+        addTestCase("tags", \testTags());
+        addTestCase("pending changes", \testPendingChanges());
+        addTestCase("identity", \testIdentity());
+
+        set_return_value(main());
+    }
+
+    private GitConfigManager::GitConfigManager setupMgr() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "ConfigBot");
+        repo.configSet("user.email", "bot@test.com");
+        return new GitConfigManager::GitConfigManager(repo);
+    }
+
+    private testReadWriteConfig() {
+        auto mgr = setupMgr();
+
+        mgr.writeConfig("config/app.yaml", "port: 8080\n");
+        *string content = mgr.readConfig("config/app.yaml");
+        assertEq("port: 8080\n", content, "read returns written content");
+
+        # Non-existent file
+        *string missing = mgr.readConfig("nonexistent.yaml");
+        assertNothing(missing, "non-existent config returns NOTHING");
+    }
+
+    private testDeleteConfig() {
+        auto mgr = setupMgr();
+
+        mgr.writeConfig("temp.txt", "temporary\n");
+        assertTrue(mgr.configExists("temp.txt"), "config exists after write");
+
+        mgr.deleteConfig("temp.txt");
+        assertFalse(mgr.configExists("temp.txt"), "config gone after delete");
+    }
+
+    private testListConfigs() {
+        auto mgr = setupMgr();
+
+        mgr.writeConfig("a.yaml", "a\n");
+        mgr.writeConfig("b.yaml", "b\n");
+        mgr.writeConfig("dir/c.yaml", "c\n");
+
+        list<string> configs = mgr.listConfigs();
+        assertEq(3, configs.size(), "3 config files listed");
+    }
+
+    private testPublish() {
+        auto mgr = setupMgr();
+
+        mgr.writeConfig("init.yaml", "version: 1\n");
+        hash<auto> result = mgr.publish("Initial config");
+        assertEq(40, result.id.size(), "publish returns 40-char commit ID");
+
+        # Verify the file persists after commit
+        *string content = mgr.readConfig("init.yaml");
+        assertEq("version: 1\n", content, "config readable after publish");
+    }
+
+    private testEnvironments() {
+        auto mgr = setupMgr();
+
+        # Need initial commit for branches to work
+        mgr.writeConfig("base.yaml", "base\n");
+        mgr.publish("Initial");
+
+        # Create and switch to staging environment
+        mgr.createEnvironment("staging");
+        mgr.switchEnvironment("staging");
+        assertEq("staging", mgr.currentEnvironment(), "current env is staging");
+
+        # Write config on staging branch
+        mgr.writeConfig("staging.yaml", "env: staging\n");
+        mgr.publish("Add staging config");
+
+        # Switch back to main
+        mgr.switchEnvironment("main");
+        assertEq("main", mgr.currentEnvironment(), "back to main");
+
+        # List environments
+        list<string> envs = mgr.environments();
+        assertTrue(envs.size() >= 2, "at least 2 environments");
+    }
+
+    private testHistory() {
+        auto mgr = setupMgr();
+
+        mgr.writeConfig("f1.txt", "a\n");
+        mgr.publish("First");
+
+        mgr.writeConfig("f2.txt", "b\n");
+        mgr.publish("Second");
+
+        list<hash<auto>> hist = mgr.history();
+        assertEq(2, hist.size(), "2 commits in history");
+
+        # Limited history
+        list<hash<auto>> limited = mgr.history(1);
+        assertEq(1, limited.size(), "limited history returns 1");
+    }
+
+    private testTags() {
+        auto mgr = setupMgr();
+
+        mgr.writeConfig("v1.yaml", "version: 1\n");
+        mgr.publish("Version 1");
+        mgr.tagState("v1.0", "Release v1.0");
+
+        list<string> tags = mgr.listTags();
+        assertEq(1, tags.size(), "1 tag");
+        assertEq("v1.0", tags[0], "tag name correct");
+    }
+
+    private testPendingChanges() {
+        auto mgr = setupMgr();
+
+        hash<auto> empty = mgr.pendingChanges();
+        assertEq(0, empty.size(), "no pending changes initially");
+
+        mgr.writeConfig("pending.yaml", "data\n");
+        hash<auto> pending = mgr.pendingChanges();
+        assertTrue(pending.size() > 0, "has pending changes after write");
+        assertTrue(pending.hasKey("pending.yaml"), "pending.yaml in changes");
+    }
+
+    private testIdentity() {
+        auto mgr = setupMgr();
+
+        mgr.setIdentity("New Author", "author@example.com");
+        mgr.writeConfig("f.txt", "content\n");
+        mgr.publish("Test identity");
+
+        list<hash<auto>> hist = mgr.history();
+        assertEq("New Author", hist[0].author.name, "identity name set correctly");
+        assertEq("author@example.com", hist[0].author.email, "identity email set correctly");
+    }
+}

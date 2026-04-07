@@ -35,6 +35,12 @@
     The \c GitConfigManager module provides high-level git-based configuration management
     with observer pattern support for reactive change detection.
 
+    It wraps a \c GitRepository (virtual or disk-backed) and provides:
+    - Config file read/write with automatic staging
+    - Sync (fetch + detect changes) and publish (commit + push)
+    - Environment/branch management
+    - Observer-based change notification via \c GitConfigWatcher
+
     @since 1.0
 */
 
@@ -46,6 +52,7 @@ module GitConfigManager {
     license = "MIT";
 }
 
-# placeholder - config manager classes will be added in Phase 9
 public namespace GitConfigManager {
+    #! Event fired when config files change during sync
+    public const EVENT_CONFIG_CHANGED = "config-changed";
 }
