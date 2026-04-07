@@ -28,15 +28,21 @@ public namespace GitForgeHelper {
 /** Wraps the GitHub and GitLab REST APIs to provide a unified interface
     for PR/MR management.
 
-    @par Example:
+    Supports two construction patterns:
+    - Direct construction with credentials:
     @code{.py}
 GitForgeHelper helper("github", {
     "owner": "myorg",
     "repo": "myrepo",
     "token": ENV.GITHUB_TOKEN,
 });
-hash<auto> pr = helper.createPullRequest("feature-branch", "main",
-    "Add new feature", "Description of changes");
+    @endcode
+
+    - Using an existing authorized REST connection:
+    @code{.py}
+# Use a named connection from ConnectionProvider
+AbstractRestClient rest = get_connection("my-github").get(True);
+GitForgeHelper helper("github", "myorg", "myrepo", rest);
     @endcode
 */
 public class GitForgeHelper {
@@ -44,11 +50,11 @@ public class GitForgeHelper {
         #! Forge type: "github" or "gitlab"
         string forge_type;
 
-        #! REST client for API calls (created lazily)
-        *RestClientIo::RestClientIo rest;
+        #! REST client (polymorphic: works with RestClient, RestClientIo, or any AbstractRestClient)
+        *RestClient::AbstractRestClient rest;
 
-        #! REST client configuration
-        hash<auto> rest_config;
+        #! REST client configuration (for lazy construction)
+        *hash<auto> rest_config;
 
         #! Owner/org name (GitHub) or project path (GitLab)
         string owner;
@@ -63,7 +69,36 @@ public class GitForgeHelper {
         Mutex rest_mutex();
     }
 
-    #! Creates the forge helper
+    #! Creates the forge helper from an existing authorized REST client
+    /** This constructor accepts any @ref RestClient::AbstractRestClient "AbstractRestClient",
+        including connections obtained from @c ConnectionProvider::get_connection().
+
+        @param forge_type "github" or "gitlab"
+        @param owner repository owner/organization (GitHub) or project namespace (GitLab)
+        @param repo repository name
+        @param rest an authorized REST client already configured with the forge's base URL and credentials
+
+        @par Example:
+        @code{.py}
+# Using a named connection
+AbstractRestClient rest = get_connection("my-github").get(True);
+GitForgeHelper helper("github", "myorg", "myrepo", rest);
+        @endcode
+
+        @throw GIT-FORGE-ERROR unsupported forge type
+    */
+    constructor(string forge_type, string owner, string repo, RestClient::AbstractRestClient rest) {
+        if (forge_type != FORGE_GITHUB && forge_type != FORGE_GITLAB) {
+            throw "GIT-FORGE-ERROR", sprintf("unsupported forge type: %y; use %y or %y",
+                forge_type, FORGE_GITHUB, FORGE_GITLAB);
+        }
+        self.forge_type = forge_type;
+        self.owner = owner;
+        self.repo_name = repo;
+        self.rest = rest;
+    }
+
+    #! Creates the forge helper with credential options
     /** @param forge_type "github" or "gitlab"
         @param opts configuration options:
         - \c owner: (required) repository owner/organization (GitHub) or project namespace (GitLab)
@@ -113,7 +148,7 @@ public class GitForgeHelper {
     }
 
     #! Returns the REST client, creating it on first use (thread-safe)
-    private RestClientIo::RestClientIo getRestClient() {
+    private RestClient::AbstractRestClient getRestClient() {
         if (!rest) {
             AutoLock al(rest_mutex);
             if (!rest) {
@@ -138,7 +173,7 @@ public class GitForgeHelper {
     */
     hash<auto> createPullRequest(string head, string base, string title, *string body) {
         if (forge_type == FORGE_GITHUB) {
-            hash<auto> resp = getRestClient().post(
+            hash<auto> resp = getRestClient().restPost(
                 sprintf("/repos/%s/%s/pulls", owner, repo_name),
                 {
                     "title": title,
@@ -154,7 +189,7 @@ public class GitForgeHelper {
             };
         } else {
             int pid = getGitLabProjectId();
-            hash<auto> resp = getRestClient().post(
+            hash<auto> resp = getRestClient().restPost(
                 sprintf("/projects/%d/merge_requests", pid),
                 {
                     "title": title,
@@ -180,7 +215,7 @@ public class GitForgeHelper {
     */
     list<hash<auto>> listPullRequests(string state = "open") {
         if (forge_type == FORGE_GITHUB) {
-            list<auto> resp = getRestClient().get(
+            list<auto> resp = getRestClient().restGet(
                 sprintf("/repos/%s/%s/pulls?state=%s", owner, repo_name,
                     Qore::encode_url(state, True)),
             ).body;
@@ -199,7 +234,7 @@ public class GitForgeHelper {
         } else {
             int pid = getGitLabProjectId();
             string gl_state = state == "open" ? "opened" : state;
-            list<auto> resp = getRestClient().get(
+            list<auto> resp = getRestClient().restGet(
                 sprintf("/projects/%d/merge_requests?state=%s", pid,
                     Qore::encode_url(gl_state, True)),
             ).body;
@@ -227,7 +262,7 @@ public class GitForgeHelper {
     */
     hash<auto> getPullRequest(int pr_id) {
         if (forge_type == FORGE_GITHUB) {
-            hash<auto> resp = getRestClient().get(
+            hash<auto> resp = getRestClient().restGet(
                 sprintf("/repos/%s/%s/pulls/%d", owner, repo_name, pr_id),
             ).body;
             return {
@@ -242,7 +277,7 @@ public class GitForgeHelper {
             };
         } else {
             int pid = getGitLabProjectId();
-            hash<auto> resp = getRestClient().get(
+            hash<auto> resp = getRestClient().restGet(
                 sprintf("/projects/%d/merge_requests/%d", pid, pr_id),
             ).body;
             return {
@@ -265,13 +300,13 @@ public class GitForgeHelper {
     */
     closePullRequest(int pr_id) {
         if (forge_type == FORGE_GITHUB) {
-            getRestClient().patch(
+            getRestClient().restPatch(
                 sprintf("/repos/%s/%s/pulls/%d", owner, repo_name, pr_id),
                 {"state": "closed"},
             );
         } else {
             int pid = getGitLabProjectId();
-            getRestClient().put(
+            getRestClient().restPut(
                 sprintf("/projects/%d/merge_requests/%d", pid, pr_id),
                 {"state_event": "close"},
             );
@@ -300,7 +335,7 @@ public class GitForgeHelper {
             return gitlab_project_id;
         }
         string path = owner + "/" + repo_name;
-        hash<auto> resp = getRestClient().get(
+        hash<auto> resp = getRestClient().restGet(
             sprintf("/projects/%s", Qore::encode_url(path, True)),
         ).body;
         gitlab_project_id = int(resp.id);
