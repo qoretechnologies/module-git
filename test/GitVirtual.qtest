@@ -1,0 +1,195 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitVirtual.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitVirtualTest
+
+public class GitVirtualTest inherits QUnit::Test {
+    constructor() : Test("GitVirtualTest", "1.0") {
+        addTestCase("create virtual repo", \testCreateVirtual());
+        addTestCase("write and read files", \testWriteReadFiles());
+        addTestCase("write and read string files", \testWriteReadStringFiles());
+        addTestCase("file operations", \testFileOperations());
+        addTestCase("commit in virtual mode", \testCommit());
+        addTestCase("multiple commits", \testMultipleCommits());
+        addTestCase("nested directory structure", \testNestedDirectories());
+        addTestCase("binary file round-trip", \testBinaryRoundTrip());
+        addTestCase("disk mode add() rejected in virtual", \testModeErrors());
+        set_return_value(main());
+    }
+
+    private testCreateVirtual() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        assertEq(True, repo.isVirtual(), "isVirtual() returns True");
+        assertEq(True, repo.isEmpty(), "virtual repo is empty initially");
+        assertEq(True, repo.isBare(), "virtual repo is conceptually bare");
+        assertNothing(repo.workdir(), "virtual repo has no workdir");
+        assertEq("<virtual>", repo.path(), "virtual repo path is <virtual>");
+    }
+
+    private testWriteReadFiles() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+
+        # Write binary content
+        binary data = binary("Hello, World!\n");
+        repo.writeFile("test.txt", data);
+
+        # Read it back
+        *binary read_data = repo.readFile("test.txt");
+        assertEq(data, read_data, "readFile returns same binary content");
+    }
+
+    private testWriteReadStringFiles() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+
+        string content = "pool_size: 10\ntimeout: 30\n";
+        repo.writeFileString("config/db.yaml", content);
+
+        *string read_content = repo.readFileString("config/db.yaml");
+        assertEq(content, read_content, "readFileString returns same content");
+    }
+
+    private testFileOperations() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+
+        # File doesn't exist initially
+        assertEq(False, repo.fileExists("missing.txt"), "non-existent file returns False");
+
+        # Write a file
+        repo.writeFileString("test.txt", "content");
+        assertEq(True, repo.fileExists("test.txt"), "file exists after write");
+
+        # List files
+        list<string> files = repo.listFiles();
+        assertEq(1, files.size(), "listFiles returns 1 file");
+        assertEq("test.txt", files[0], "listFiles returns correct filename");
+
+        # Delete the file
+        repo.deleteFile("test.txt");
+        assertEq(False, repo.fileExists("test.txt"), "file gone after delete");
+
+        # List should be empty
+        files = repo.listFiles();
+        assertEq(0, files.size(), "listFiles empty after delete");
+    }
+
+    private testCommit() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Virtual User");
+        repo.configSet("user.email", "virtual@test.com");
+
+        # Write and commit
+        repo.writeFileString("readme.txt", "Hello\n");
+        string oid = repo.commit("Initial commit");
+
+        assertEq(40, oid.length(), "commit returns 40-char hex OID");
+        assertRegex("^[0-9a-f]{40}$", oid, "commit OID is valid hex");
+        assertEq(False, repo.isEmpty(), "repo not empty after commit");
+
+        # HEAD should match
+        *string head = repo.headCommitId();
+        assertEq(oid, head, "headCommitId matches commit OID");
+    }
+
+    private testMultipleCommits() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+
+        # First commit
+        repo.writeFileString("file1.txt", "first\n");
+        string oid1 = repo.commit("First commit");
+
+        # Second commit (add another file)
+        repo.writeFileString("file2.txt", "second\n");
+        string oid2 = repo.commit("Second commit");
+
+        assertNeq(oid1, oid2, "different commits have different OIDs");
+        assertEq(oid2, repo.headCommitId(), "HEAD points to latest commit");
+    }
+
+    private testNestedDirectories() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+
+        # Write files in nested structure
+        repo.writeFileString("config/database/main.yaml", "host: localhost\n");
+        repo.writeFileString("config/database/replica.yaml", "host: replica\n");
+        repo.writeFileString("config/services/api.yaml", "port: 8080\n");
+        repo.writeFileString("readme.txt", "Root file\n");
+
+        # Commit
+        string oid = repo.commit("Add nested config");
+        assertEq(40, oid.length(), "nested commit succeeds");
+
+        # Read back nested files
+        *string main_db = repo.readFileString("config/database/main.yaml");
+        assertEq("host: localhost\n", main_db, "nested file content correct");
+
+        *string api = repo.readFileString("config/services/api.yaml");
+        assertEq("port: 8080\n", api, "nested file in different dir correct");
+
+        # List files — virtual tree should contain all written files
+        list<string> files = repo.listFiles();
+        assertTrue(files.size() >= 4, "at least 4 files in virtual tree");
+    }
+
+    private testBinaryRoundTrip() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+
+        # Create binary content with null bytes
+        binary data = <0102030000050607>;
+        repo.writeFile("data.bin", data);
+
+        # Read back before commit
+        *binary read = repo.readFile("data.bin");
+        assertEq(data, read, "binary content preserved before commit");
+
+        # Commit and read back
+        repo.commit("Add binary file");
+        # After commit, the file should still be readable from the virtual tree
+        # (virtual tree persists across commits)
+        *binary read2 = repo.readFile("data.bin");
+        assertEq(data, read2, "binary content preserved after commit");
+    }
+
+    private testModeErrors() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+
+        # add() should fail in virtual mode
+        assertThrows("GIT-MODE-ERROR", \repo.add(), ("test.txt",),
+            "add() throws GIT-MODE-ERROR in virtual mode");
+
+        # unstage() should fail in virtual mode
+        assertThrows("GIT-MODE-ERROR", \repo.unstage(), ("test.txt",),
+            "unstage() throws GIT-MODE-ERROR in virtual mode");
+    }
+}

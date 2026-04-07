@@ -1,0 +1,429 @@
+/* -*- mode: c++; indent-tabs-mode: nil -*- */
+/*
+    QC_GitRepository.qpp
+
+    Qore Git Module
+
+    Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+#include "git-module.h"
+#include "QoreGitRepository.h"
+
+//! Git repository class providing access to a local git repository
+/** @par Example:
+    @code{.py}
+GitRepository repo(".");
+printf("HEAD: %s\n", repo.headCommitId());
+    @endcode
+
+    This class wraps libgit2's @c git_repository API and supports two modes of operation:
+
+    - <b>Disk-backed mode</b>: Traditional git repository on the local filesystem.
+      Created with the constructor or @ref init().
+    - <b>Virtual/in-memory mode</b>: Git repository with no filesystem dependency.
+      Created with @ref createVirtual(). All objects live in memory. Ideal for
+      applications like Qorus that store configuration in a database.
+
+    Both modes share the virtual filesystem API (@ref writeFile(), @ref readFile(),
+    @ref deleteFile(), @ref listFiles()) for manipulating file content.
+
+    @since git 1.0
+*/
+qclass GitRepository [arg=QoreGitRepository* repo; ns=Qore::Git; dom=FILESYSTEM,NETWORK; flags=final];
+
+//! Opens an existing git repository at the given path
+/** @par Example:
+    @code{.py}
+GitRepository repo("/path/to/repo");
+    @endcode
+
+    @param path the path to the git repository (or any path within the working directory)
+
+    @throw GIT-REPOSITORY-OPEN-ERROR failed to open repository
+*/
+GitRepository::constructor(string path) {
+    ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(path->c_str(), xsink), xsink);
+    if (*xsink) {
+        return;
+    }
+    self->setPrivate(CID_GITREPOSITORY, repo.release());
+}
+
+//! Initializes a new git repository at the given path
+/** @par Example:
+    @code{.py}
+GitRepository repo = GitRepository::init("/path/to/new/repo");
+    @endcode
+
+    @param path the path where the repository should be initialized
+    @param bare if @ref True "True", creates a bare repository (default @ref False "False")
+
+    @return a new GitRepository object
+
+    @throw GIT-REPOSITORY-INIT-ERROR failed to initialize repository
+*/
+static GitRepository GitRepository::init(string path, *bool bare) [dom=FILESYSTEM] {
+    ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(path->c_str(), bare, xsink), xsink);
+    if (*xsink) {
+        return QoreValue();
+    }
+
+    ReferenceHolder<QoreObject> rv(new QoreObject(QC_GITREPOSITORY, getProgram()), xsink);
+    rv->setPrivate(CID_GITREPOSITORY, repo.release());
+    return rv.release();
+}
+
+//! Creates an in-memory virtual repository with no filesystem dependency
+/** @par Example:
+    @code{.py}
+GitRepository repo = GitRepository::createVirtual();
+repo.configSet("user.name", "Qorus");
+repo.configSet("user.email", "qorus@example.com");
+repo.writeFileString("config/db.yaml", "pool_size: 10\n");
+string oid = repo.commit("Initial config");
+    @endcode
+
+    @return a new GitRepository object in virtual/in-memory mode
+
+    @throw GIT-VIRTUAL-ERROR failed to create virtual repository
+*/
+static GitRepository GitRepository::createVirtual() {
+    ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(true, xsink), xsink);
+    if (*xsink) {
+        return QoreValue();
+    }
+
+    ReferenceHolder<QoreObject> rv(new QoreObject(QC_GITREPOSITORY, getProgram()), xsink);
+    rv->setPrivate(CID_GITREPOSITORY, repo.release());
+    return rv.release();
+}
+
+//! Returns @ref True "True" if this is a virtual (in-memory) repository
+/** @par Example:
+    @code{.py}
+if (repo.isVirtual()) {
+    printf("This repo has no filesystem\n");
+}
+    @endcode
+
+    @return @ref True "True" if this is a virtual repository
+*/
+bool GitRepository::isVirtual() [flags=CONSTANT] {
+    return repo->isVirtual();
+}
+
+//! Reads file content from the current tree as binary data
+/** @par Example:
+    @code{.py}
+*binary data = repo.readFile("config/db.yaml");
+    @endcode
+
+    @param path the file path within the repository
+
+    @return the file content as binary data, or @ref nothing if the file does not exist
+
+    @throw GIT-READ-ERROR failed to read file
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+*binary GitRepository::readFile(string path) {
+    return repo->readFile(path->c_str(), xsink);
+}
+
+//! Reads file content from the current tree as a string
+/** @par Example:
+    @code{.py}
+*string yaml = repo.readFileString("config/db.yaml");
+    @endcode
+
+    @param path the file path within the repository
+    @param encoding the character encoding (default: UTF-8)
+
+    @return the file content as a string, or @ref nothing if the file does not exist
+
+    @throw GIT-READ-ERROR failed to read file
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+*string GitRepository::readFileString(string path, *string encoding) {
+    return repo->readFileString(path->c_str(), encoding ? encoding->c_str() : nullptr, xsink);
+}
+
+//! Writes binary content to a file in the repository
+/** In virtual mode, creates a blob in memory. In disk mode, writes to the working
+    directory and stages the file.
+
+    @par Example:
+    @code{.py}
+repo.writeFile("data/image.png", binary_data);
+    @endcode
+
+    @param path the file path within the repository
+    @param content the binary content to write
+
+    @throw GIT-WRITE-ERROR failed to write file
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::writeFile(string path, binary content) {
+    repo->writeFile(path->c_str(), content->getPtr(), content->size(), xsink);
+}
+
+//! Writes string content to a file in the repository
+/** In virtual mode, creates a blob in memory. In disk mode, writes to the working
+    directory and stages the file.
+
+    @par Example:
+    @code{.py}
+repo.writeFileString("config/db.yaml", "pool_size: 10\n");
+    @endcode
+
+    @param path the file path within the repository
+    @param content the string content to write
+
+    @throw GIT-WRITE-ERROR failed to write file
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::writeFileString(string path, string content) {
+    repo->writeFileString(path->c_str(), content->c_str(), content->size(), xsink);
+}
+
+//! Deletes a file from the repository
+/** In virtual mode, removes from the in-memory tree. In disk mode, deletes from
+    the working directory and unstages.
+
+    @par Example:
+    @code{.py}
+repo.deleteFile("config/old.yaml");
+    @endcode
+
+    @param path the file path within the repository
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::deleteFile(string path) {
+    repo->deleteFile(path->c_str(), xsink);
+}
+
+//! Returns @ref True "True" if a file exists in the current tree
+/** @par Example:
+    @code{.py}
+if (repo.fileExists("config/db.yaml")) {
+    auto data = repo.readFileString("config/db.yaml");
+}
+    @endcode
+
+    @param path the file path within the repository
+
+    @return @ref True "True" if the file exists
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+bool GitRepository::fileExists(string path) {
+    return repo->fileExists(path->c_str(), xsink);
+}
+
+//! Lists files in the current tree
+/** @par Example:
+    @code{.py}
+list<string> files = repo.listFiles();
+    @endcode
+
+    @return a list of file paths in the repository
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+list<string> GitRepository::listFiles() {
+    return repo->listFiles(nullptr, true, xsink);
+}
+
+//! Returns the path to the .git directory
+/** @par Example:
+    @code{.py}
+string path = repo.path();
+    @endcode
+
+    @return the path to the .git directory
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+string GitRepository::path() {
+    return repo->getPath(xsink);
+}
+
+//! Returns the path to the working directory, or @ref nothing for bare repos
+/** @par Example:
+    @code{.py}
+*string workdir = repo.workdir();
+    @endcode
+
+    @return the working directory path, or @ref nothing for bare repositories
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+*string GitRepository::workdir() {
+    return repo->getWorkdir(xsink);
+}
+
+//! Returns @ref True "True" if the repository is bare
+/** @par Example:
+    @code{.py}
+bool bare = repo.isBare();
+    @endcode
+
+    @return @ref True "True" if the repository is bare
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+bool GitRepository::isBare() {
+    return repo->isBare(xsink);
+}
+
+//! Returns @ref True "True" if the repository has no commits
+/** @par Example:
+    @code{.py}
+bool empty = repo.isEmpty();
+    @endcode
+
+    @return @ref True "True" if the repository has no commits
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+bool GitRepository::isEmpty() {
+    return repo->isEmpty(xsink);
+}
+
+//! Adds a file to the staging area (index) by path
+/** @par Example:
+    @code{.py}
+repo.add("file.txt");
+    @endcode
+
+    @param path the file path relative to the working directory
+
+    @throw GIT-INDEX-ERROR failed to add file to index
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::add(string path) {
+    repo->addToIndex(path->c_str(), xsink);
+}
+
+//! Removes a file from the staging area (index) by path
+/** @par Example:
+    @code{.py}
+repo.unstage("file.txt");
+    @endcode
+
+    @param path the file path relative to the working directory
+
+    @throw GIT-INDEX-ERROR failed to remove file from index
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+    @throw GIT-MODE-ERROR if called on a virtual repository
+*/
+nothing GitRepository::unstage(string path) {
+    repo->removeFromIndex(path->c_str(), xsink);
+}
+
+//! Creates a commit from the current index state using the default signature
+/** @par Example:
+    @code{.py}
+string oid = repo.commit("Initial commit");
+    @endcode
+
+    @param message the commit message
+
+    @return the hex OID string of the new commit
+
+    @throw GIT-COMMIT-ERROR failed to create commit
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @note Requires user.name and user.email to be configured in git config.
+    Use @ref configSet() to configure them.
+*/
+string GitRepository::commit(string message) {
+    return repo->commit(message->c_str(), xsink);
+}
+
+//! Returns the hex OID of the HEAD commit, or @ref nothing for empty repos
+/** @par Example:
+    @code{.py}
+*string head = repo.headCommitId();
+    @endcode
+
+    @return the hex OID string of the HEAD commit, or @ref nothing if the repository has no commits
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+*string GitRepository::headCommitId() {
+    return repo->headCommitId(xsink);
+}
+
+//! Returns the status of the working directory as a hash mapping paths to status flags
+/** @par Example:
+    @code{.py}
+hash<string, int> status = repo.status();
+for (hash<auto> i in (status.pairIterator())) {
+    printf("%s: %d\n", i.key, i.value);
+}
+    @endcode
+
+    @return a hash mapping file paths to status flag integers; see @ref git_status_constants
+
+    @throw GIT-STATUS-ERROR failed to get status
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @see @ref GIT_STATUS_INDEX_NEW, @ref GIT_STATUS_WT_MODIFIED, etc.
+*/
+hash<string, int> GitRepository::status() {
+    return repo->getStatus(xsink);
+}
+
+//! Sets a git configuration value for this repository
+/** @par Example:
+    @code{.py}
+repo.configSet("user.name", "John Doe");
+repo.configSet("user.email", "john@example.com");
+    @endcode
+
+    @param key the configuration key
+    @param value the configuration value
+
+    @throw GIT-CONFIG-ERROR failed to set config value
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::configSet(string key, string value) {
+    repo->configSet(key->c_str(), value->c_str(), xsink);
+}
+
+//! Gets a git configuration value for this repository
+/** @par Example:
+    @code{.py}
+*string name = repo.configGet("user.name");
+    @endcode
+
+    @param key the configuration key
+
+    @return the configuration value, or @ref nothing if not found
+
+    @throw GIT-CONFIG-ERROR failed to get config value
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+*string GitRepository::configGet(string key) {
+    return repo->configGet(key->c_str(), xsink);
+}

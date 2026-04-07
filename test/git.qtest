@@ -1,0 +1,201 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  git.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitTest
+
+public class GitTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+        addTestCase("init and open", \testInitAndOpen());
+        addTestCase("bare repository", \testBareRepo());
+        addTestCase("add and commit", \testAddAndCommit());
+        addTestCase("status", \testStatus());
+        addTestCase("config", \testConfig());
+        addTestCase("empty repo operations", \testEmptyRepo());
+        set_return_value(main());
+    }
+
+    destructor() {
+        # clean up temp directory
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private testInitAndOpen() {
+        string repo_path = m_tmpdir + "/test-init";
+
+        # init a new non-bare repo
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        assertEq(False, repo.isBare(), "non-bare repo isBare()");
+        assertEq(True, repo.isEmpty(), "new repo isEmpty()");
+        assertTrue(repo.path().val(), "path() returns non-empty string");
+        assertTrue(repo.workdir().val(), "workdir() returns non-empty string");
+
+        # open the same repo
+        Git::GitRepository repo2(repo_path);
+        assertEq(False, repo2.isBare(), "opened repo isBare()");
+        assertEq(True, repo2.isEmpty(), "opened repo isEmpty()");
+    }
+
+    private testBareRepo() {
+        string repo_path = m_tmpdir + "/test-bare";
+
+        Git::GitRepository repo = Git::GitRepository::init(repo_path, True);
+        assertEq(True, repo.isBare(), "bare repo isBare()");
+        assertEq(True, repo.isEmpty(), "bare repo isEmpty()");
+        assertNothing(repo.workdir(), "bare repo workdir() returns NOTHING");
+    }
+
+    private testAddAndCommit() {
+        string repo_path = m_tmpdir + "/test-commit";
+
+        # init repo
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+
+        # configure identity
+        repo.configSet("user.name", "Test User");
+        repo.configSet("user.email", "test@example.com");
+
+        # create a file
+        {
+            File f();
+            f.open(repo_path + "/hello.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("Hello, World!\n");
+        }
+
+        # stage and commit
+        repo.add("hello.txt");
+        string oid = repo.commit("Initial commit");
+        assertEq(40, oid.length(), "commit returns 40-char hex OID");
+        assertRegex("^[0-9a-f]{40}$", oid, "commit OID is valid hex");
+
+        # verify HEAD
+        *string head = repo.headCommitId();
+        assertEq(oid, head, "headCommitId() matches commit return value");
+
+        # verify repo is no longer empty
+        assertEq(False, repo.isEmpty(), "repo not empty after commit");
+
+        # second commit
+        {
+            File f();
+            f.open(repo_path + "/world.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("World!\n");
+        }
+        repo.add("world.txt");
+        string oid2 = repo.commit("Second commit");
+        assertNeq(oid, oid2, "second commit has different OID");
+        assertEq(oid2, repo.headCommitId(), "HEAD points to latest commit");
+    }
+
+    private testStatus() {
+        string repo_path = m_tmpdir + "/test-status";
+
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.configSet("user.name", "Test User");
+        repo.configSet("user.email", "test@example.com");
+
+        # empty status
+        hash<string, int> status = repo.status();
+        assertEq(0, status.size(), "empty repo has no status entries");
+
+        # create an untracked file
+        {
+            File f();
+            f.open(repo_path + "/untracked.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("untracked\n");
+        }
+        status = repo.status();
+        assertEq(1, status.size(), "one untracked file");
+        assertTrue(status.hasKey("untracked.txt"), "status contains untracked.txt");
+        # GIT_STATUS_WT_NEW = 128
+        assertTrue((status{"untracked.txt"} & Git::GIT_STATUS_WT_NEW) != 0,
+            "untracked file has WT_NEW flag");
+
+        # stage it
+        repo.add("untracked.txt");
+        status = repo.status();
+        assertTrue((status{"untracked.txt"} & Git::GIT_STATUS_INDEX_NEW) != 0,
+            "staged file has INDEX_NEW flag");
+
+        # commit and verify clean
+        repo.commit("Add file");
+        status = repo.status();
+        assertEq(0, status.size(), "clean working dir after commit");
+
+        # modify the file
+        {
+            File f();
+            f.open(repo_path + "/untracked.txt", O_WRONLY | O_TRUNC);
+            f.write("modified\n");
+        }
+        status = repo.status();
+        assertTrue((status{"untracked.txt"} & Git::GIT_STATUS_WT_MODIFIED) != 0,
+            "modified file has WT_MODIFIED flag");
+    }
+
+    private testConfig() {
+        string repo_path = m_tmpdir + "/test-config";
+
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+
+        # set and get config
+        repo.configSet("user.name", "Config Test");
+        *string name = repo.configGet("user.name");
+        assertEq("Config Test", name, "configGet returns set value");
+
+        repo.configSet("user.email", "config@test.com");
+        *string email = repo.configGet("user.email");
+        assertEq("config@test.com", email, "configGet returns email");
+
+        # non-existent key returns NOTHING
+        *string missing = repo.configGet("nonexistent.key");
+        assertNothing(missing, "non-existent config key returns NOTHING");
+    }
+
+    private testEmptyRepo() {
+        string repo_path = m_tmpdir + "/test-empty";
+
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+
+        # HEAD on empty repo
+        *string head = repo.headCommitId();
+        assertNothing(head, "headCommitId() returns NOTHING on empty repo");
+
+        # status on empty repo
+        hash<string, int> status = repo.status();
+        assertEq(0, status.size(), "empty repo has empty status");
+    }
+}

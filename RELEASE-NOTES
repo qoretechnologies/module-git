@@ -1,0 +1,22 @@
+***********
+version 1.0
+***********
+
+initial release:
+- Git::GitRepository class for repository operations (open, init, clone)
+- index/staging operations (add, remove, reset)
+- commit creation and history traversal
+- branch and tag management
+- diff and status operations
+- remote management (fetch, push, pull)
+- merge with conflict detection
+- stash, blame, config operations
+- revision walking with sorting
+- credential handling (SSH key, password, agent)
+- sandboxing support (QDOM_FILESYSTEM, QDOM_NETWORK)
+- cooperative cancellation for blocking operations
+- GitDataProvider module for data provider integration
+- GitConnections module for connection management
+- GitConfigManager module for high-level configuration management
+- GitConfigWatcher with observer pattern for change detection
+- GitForgeHelper module for GitHub/GitLab PR/MR creation

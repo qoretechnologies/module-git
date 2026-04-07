@@ -1,0 +1,29 @@
+*~
+*.lo
+*.la
+build/
+build-debug/
+
+# QPP generated files
+src/qc_*.cpp
+src/ql_*.cpp
+src/QC_*.cpp
+*.dox.h
+
+# Doxygen
+docs/*.tag
+docs/git/
+docs/GitDataProvider/
+docs/GitConfigManager/
+docs/GitForgeHelper/
+docs/GitConnections/
+docs/doxyfile
+docs/*.doxygen
+docs/qlib/Doxyfile.*
+
+# IDE files
+.cproject
+.project
+.settings/
+.vscode
+.idea/

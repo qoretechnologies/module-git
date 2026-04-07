@@ -1,0 +1,943 @@
+/* -*- mode: c++; indent-tabs-mode: nil -*- */
+/*
+    QoreGitRepository.cpp
+
+    Qore Git Module - C++ wrapper for git_repository (dual-mode implementation)
+
+    Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+#include "QoreGitRepository.h"
+#include "QoreGitMemoryODB.h"
+#include "QoreGitMemoryRefDB.h"
+
+#include <cstring>
+#include <sys/stat.h>
+
+// --- Constructors ---
+
+QoreGitRepository::QoreGitRepository(const char* path, ExceptionSink* xsink)
+    : m_path(path), m_virtual(false) {
+    int rc = git_repository_open(&m_repo, path);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-REPOSITORY-OPEN-ERROR", rc, "failed to open git repository");
+    }
+}
+
+QoreGitRepository::QoreGitRepository(const char* path, bool bare, ExceptionSink* xsink)
+    : m_path(path), m_virtual(false) {
+    int rc = git_repository_init(&m_repo, path, bare ? 1 : 0);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-REPOSITORY-INIT-ERROR", rc, "failed to initialize git repository");
+    }
+}
+
+QoreGitRepository::QoreGitRepository(bool virtual_mode, ExceptionSink* xsink)
+    : m_virtual(true) {
+    // Create in-memory ODB
+    int rc = git_odb_new(&m_odb);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory ODB");
+        return;
+    }
+
+    // Add memory backend
+    git_odb_backend* odb_backend = nullptr;
+    rc = qore_git_memory_odb_new(&odb_backend);
+    if (rc < 0) {
+        git_odb_free(m_odb);
+        m_odb = nullptr;
+        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to create memory ODB backend");
+        return;
+    }
+    rc = git_odb_add_backend(m_odb, odb_backend, 1);
+    if (rc < 0) {
+        // odb_backend is freed by git_odb_add_backend on failure
+        git_odb_free(m_odb);
+        m_odb = nullptr;
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to add memory ODB backend");
+        return;
+    }
+
+    // Create repo wrapping the ODB
+    rc = git_repository_wrap_odb(&m_repo, m_odb);
+    if (rc < 0) {
+        git_odb_free(m_odb);
+        m_odb = nullptr;
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create virtual repository");
+        return;
+    }
+
+    // Create and set memory refdb
+    git_refdb* refdb = nullptr;
+    rc = git_refdb_new(&refdb, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create refdb");
+        return;
+    }
+
+    git_refdb_backend* refdb_backend = nullptr;
+    rc = qore_git_memory_refdb_new(&refdb_backend);
+    if (rc < 0) {
+        git_refdb_free(refdb);
+        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to create memory refdb backend");
+        return;
+    }
+
+    rc = git_refdb_set_backend(refdb, refdb_backend);
+    if (rc < 0) {
+        git_refdb_free(refdb);
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to set memory refdb backend");
+        return;
+    }
+
+    git_repository_set_refdb(m_repo, refdb);
+    git_refdb_free(refdb);  // repo now owns it
+
+    // Create in-memory index
+    rc = git_index_new(&m_index);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory index");
+        return;
+    }
+
+    git_repository_set_index(m_repo, m_index);
+}
+
+// --- Info Methods ---
+
+QoreStringNode* QoreGitRepository::getPath(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+    if (m_virtual) {
+        return new QoreStringNode("<virtual>");
+    }
+    const char* path = git_repository_path(m_repo);
+    return new QoreStringNode(path);
+}
+
+QoreStringNode* QoreGitRepository::getWorkdir(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+    if (m_virtual) {
+        return nullptr;  // virtual repos have no working directory
+    }
+    const char* workdir = git_repository_workdir(m_repo);
+    if (!workdir) {
+        return nullptr;
+    }
+    return new QoreStringNode(workdir);
+}
+
+bool QoreGitRepository::isBare(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return false;
+    }
+    if (m_virtual) {
+        return true;  // virtual repos are conceptually bare
+    }
+    return git_repository_is_bare(m_repo) != 0;
+}
+
+bool QoreGitRepository::isEmpty(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return false;
+    }
+    // Check if HEAD exists
+    git_reference* head_ref = nullptr;
+    int rc = git_repository_head(&head_ref, m_repo);
+    if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+        return true;
+    }
+    if (rc == 0) {
+        git_reference_free(head_ref);
+    }
+    return false;
+}
+
+// --- Disk-Mode Index Operations ---
+
+int QoreGitRepository::addToIndex(const char* path, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+    if (m_virtual) {
+        xsink->raiseException("GIT-MODE-ERROR", "add() requires a disk-backed repository; use writeFile() for virtual repos");
+        return -1;
+    }
+
+    git_index* index = nullptr;
+    int rc = git_repository_index(&index, m_repo);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-INDEX-ERROR", rc, "failed to get repository index");
+    }
+
+    rc = git_index_add_bypath(index, path);
+    if (rc < 0) {
+        git_index_free(index);
+        return git_raise_exception(xsink, "GIT-INDEX-ERROR", rc, "failed to add file to index");
+    }
+
+    rc = git_index_write(index);
+    git_index_free(index);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-INDEX-ERROR", rc, "failed to write index");
+    }
+    return 0;
+}
+
+int QoreGitRepository::removeFromIndex(const char* path, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+    if (m_virtual) {
+        xsink->raiseException("GIT-MODE-ERROR", "remove() requires a disk-backed repository; use deleteFile() for virtual repos");
+        return -1;
+    }
+
+    git_index* index = nullptr;
+    int rc = git_repository_index(&index, m_repo);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-INDEX-ERROR", rc, "failed to get repository index");
+    }
+
+    rc = git_index_remove_bypath(index, path);
+    if (rc < 0) {
+        git_index_free(index);
+        return git_raise_exception(xsink, "GIT-INDEX-ERROR", rc, "failed to remove file from index");
+    }
+
+    rc = git_index_write(index);
+    git_index_free(index);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-INDEX-ERROR", rc, "failed to write index");
+    }
+    return 0;
+}
+
+// --- Virtual Filesystem API ---
+
+BinaryNode* QoreGitRepository::readFile(const char* path, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    // First check the virtual tree (staged/written files)
+    auto it = m_virtual_tree.find(path);
+    if (it != m_virtual_tree.end()) {
+        git_blob* blob = nullptr;
+        int rc = git_blob_lookup(&blob, m_repo, &it->second);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-READ-ERROR", rc, "failed to read blob");
+            return nullptr;
+        }
+        const void* content = git_blob_rawcontent(blob);
+        git_object_size_t size = git_blob_rawsize(blob);
+        SimpleRefHolder<BinaryNode> result(new BinaryNode());
+        result->append(content, size);
+        git_blob_free(blob);
+        return result.release();
+    }
+
+    // Fall back to HEAD tree
+    git_reference* head_ref = nullptr;
+    int rc = git_repository_head(&head_ref, m_repo);
+    if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+        return nullptr;  // empty repo, no file
+    }
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-READ-ERROR", rc, "failed to get HEAD");
+        return nullptr;
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, m_repo, git_reference_target(head_ref));
+    git_reference_free(head_ref);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-READ-ERROR", rc, "failed to lookup HEAD commit");
+        return nullptr;
+    }
+
+    git_tree* tree = nullptr;
+    rc = git_commit_tree(&tree, commit);
+    git_commit_free(commit);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-READ-ERROR", rc, "failed to get commit tree");
+        return nullptr;
+    }
+
+    git_tree_entry* entry = nullptr;
+    rc = git_tree_entry_bypath(&entry, tree, path);
+    git_tree_free(tree);
+    if (rc == GIT_ENOTFOUND) {
+        return nullptr;  // file not in tree
+    }
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-READ-ERROR", rc, "failed to find file in tree");
+        return nullptr;
+    }
+
+    git_blob* blob = nullptr;
+    rc = git_blob_lookup(&blob, m_repo, git_tree_entry_id(entry));
+    git_tree_entry_free(entry);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-READ-ERROR", rc, "failed to read blob");
+        return nullptr;
+    }
+
+    const void* content = git_blob_rawcontent(blob);
+    git_object_size_t size = git_blob_rawsize(blob);
+    SimpleRefHolder<BinaryNode> result(new BinaryNode());
+    result->append(content, size);
+    git_blob_free(blob);
+    return result.release();
+}
+
+QoreStringNode* QoreGitRepository::readFileString(const char* path, const char* encoding,
+                                                    ExceptionSink* xsink) {
+    SimpleRefHolder<BinaryNode> bin(readFile(path, xsink));
+    if (*xsink || !bin) {
+        return nullptr;
+    }
+    // Default to UTF-8
+    const QoreEncoding* enc = encoding ? QEM.findCreate(encoding) : QCS_UTF8;
+    return new QoreStringNode(static_cast<const char*>(bin->getPtr()), bin->size(), enc);
+}
+
+int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
+                                  ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    // Create blob from buffer
+    git_oid blob_oid;
+    int rc = git_blob_create_from_buffer(&blob_oid, m_repo, data, len);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-WRITE-ERROR", rc, "failed to create blob from buffer");
+    }
+
+    // Track in virtual tree
+    m_virtual_tree[path] = blob_oid;
+
+    // If in disk mode, also write the file to the working directory and stage it
+    if (!m_virtual) {
+        const char* workdir = git_repository_workdir(m_repo);
+        if (workdir) {
+            std::string full_path = std::string(workdir) + path;
+
+            // Ensure parent directory exists
+            std::string dir = full_path.substr(0, full_path.rfind('/'));
+            if (!dir.empty()) {
+                // Simple mkdir -p equivalent
+                std::string accum;
+                for (size_t i = 0; i < dir.size(); ++i) {
+                    accum += dir[i];
+                    if (dir[i] == '/' || i == dir.size() - 1) {
+                        mkdir(accum.c_str(), 0755);
+                    }
+                }
+            }
+
+            FILE* f = fopen(full_path.c_str(), "wb");
+            if (f) {
+                fwrite(data, 1, len, f);
+                fclose(f);
+            }
+
+            // Stage the file
+            git_index* index = nullptr;
+            rc = git_repository_index(&index, m_repo);
+            if (rc == 0) {
+                git_index_add_bypath(index, path);
+                git_index_write(index);
+                git_index_free(index);
+            }
+        }
+    }
+
+    return 0;
+}
+
+int QoreGitRepository::writeFileString(const char* path, const char* content, size_t len,
+                                        ExceptionSink* xsink) {
+    return writeFile(path, content, len, xsink);
+}
+
+int QoreGitRepository::deleteFile(const char* path, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    auto it = m_virtual_tree.find(path);
+    if (it != m_virtual_tree.end()) {
+        m_virtual_tree.erase(it);
+    }
+
+    // In disk mode, also delete from working directory and index
+    if (!m_virtual) {
+        const char* workdir = git_repository_workdir(m_repo);
+        if (workdir) {
+            std::string full_path = std::string(workdir) + path;
+            ::remove(full_path.c_str());
+        }
+        git_index* index = nullptr;
+        int rc = git_repository_index(&index, m_repo);
+        if (rc == 0) {
+            git_index_remove_bypath(index, path);
+            git_index_write(index);
+            git_index_free(index);
+        }
+    }
+
+    return 0;
+}
+
+bool QoreGitRepository::fileExists(const char* path, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return false;
+    }
+
+    // Check virtual tree first
+    if (m_virtual_tree.count(path)) {
+        return true;
+    }
+
+    // Check HEAD tree
+    git_reference* head_ref = nullptr;
+    int rc = git_repository_head(&head_ref, m_repo);
+    if (rc != 0) {
+        return false;
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, m_repo, git_reference_target(head_ref));
+    git_reference_free(head_ref);
+    if (rc != 0) {
+        return false;
+    }
+
+    git_tree* tree = nullptr;
+    rc = git_commit_tree(&tree, commit);
+    git_commit_free(commit);
+    if (rc != 0) {
+        return false;
+    }
+
+    git_tree_entry* entry = nullptr;
+    rc = git_tree_entry_bypath(&entry, tree, path);
+    git_tree_free(tree);
+    if (rc == 0) {
+        git_tree_entry_free(entry);
+        return true;
+    }
+    return false;
+}
+
+QoreListNode* QoreGitRepository::listFiles(const char* glob, bool recursive, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreListNode> result(new QoreListNode(stringTypeInfo), xsink);
+
+    // List from virtual tree
+    for (auto& kv : m_virtual_tree) {
+        if (qore_check_cancel(xsink, "git list files")) {
+            return nullptr;
+        }
+        result->push(new QoreStringNode(kv.first), xsink);
+    }
+
+    // Also list from HEAD tree (if any files not in virtual tree)
+    git_reference* head_ref = nullptr;
+    int rc = git_repository_head(&head_ref, m_repo);
+    if (rc == 0) {
+        git_commit* commit = nullptr;
+        rc = git_commit_lookup(&commit, m_repo, git_reference_target(head_ref));
+        git_reference_free(head_ref);
+        if (rc == 0) {
+            git_tree* tree = nullptr;
+            rc = git_commit_tree(&tree, commit);
+            git_commit_free(commit);
+            if (rc == 0) {
+                size_t count = git_tree_entrycount(tree);
+                for (size_t i = 0; i < count; i++) {
+                    if ((i % 100) == 0 && qore_check_cancel(xsink, "git list files")) {
+                        git_tree_free(tree);
+                        return nullptr;
+                    }
+                    const git_tree_entry* entry = git_tree_entry_byindex(tree, i);
+                    const char* name = git_tree_entry_name(entry);
+                    if (!m_virtual_tree.count(name)) {
+                        result->push(new QoreStringNode(name), xsink);
+                    }
+                }
+                git_tree_free(tree);
+            }
+        }
+    }
+
+    return result.release();
+}
+
+// --- Commit Operations ---
+
+QoreStringNode* QoreGitRepository::commit(const char* message, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    if (m_virtual) {
+        // Virtual mode: build tree from m_virtual_tree
+        if (m_virtual_tree.empty()) {
+            xsink->raiseException("GIT-COMMIT-ERROR", "no files staged for commit");
+            return nullptr;
+        }
+
+        git_oid tree_oid;
+        if (buildTreeFromVirtualTree(&tree_oid, xsink) < 0) {
+            return nullptr;
+        }
+
+        git_tree* tree = nullptr;
+        int rc = git_tree_lookup(&tree, m_repo, &tree_oid);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to look up tree");
+            return nullptr;
+        }
+
+        // Create signature
+        git_signature* sig = nullptr;
+        rc = git_signature_now(&sig, "Virtual User", "virtual@example.com");
+        if (rc < 0) {
+            git_tree_free(tree);
+            git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to create signature");
+            return nullptr;
+        }
+
+        // Check for config-based signature override
+        git_config* config = nullptr;
+        if (git_repository_config(&config, m_repo) == 0) {
+            git_config_entry* name_entry = nullptr;
+            git_config_entry* email_entry = nullptr;
+            if (git_config_get_entry(&name_entry, config, "user.name") == 0 &&
+                git_config_get_entry(&email_entry, config, "user.email") == 0) {
+                git_signature_free(sig);
+                git_signature_now(&sig, name_entry->value, email_entry->value);
+                git_config_entry_free(email_entry);
+            }
+            if (name_entry) {
+                git_config_entry_free(name_entry);
+            }
+            git_config_free(config);
+        }
+
+        // Determine parent
+        git_commit* parent = nullptr;
+        bool has_parent = false;
+        git_reference* head_ref = nullptr;
+        rc = git_repository_head(&head_ref, m_repo);
+        if (rc == 0) {
+            const git_oid* head_oid = git_reference_target(head_ref);
+            if (head_oid && git_commit_lookup(&parent, m_repo, head_oid) == 0) {
+                has_parent = true;
+            }
+            git_reference_free(head_ref);
+        }
+
+        // Create commit
+        git_oid commit_oid;
+        const git_commit* parents[] = {parent};
+        rc = git_commit_create(
+            &commit_oid, m_repo, "HEAD",
+            sig, sig, nullptr, message, tree,
+            has_parent ? 1 : 0,
+            has_parent ? parents : nullptr
+        );
+
+        git_signature_free(sig);
+        git_tree_free(tree);
+        if (parent) {
+            git_commit_free(parent);
+        }
+
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to create commit");
+            return nullptr;
+        }
+
+        char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+        git_oid_tostr(oid_hex, sizeof(oid_hex), &commit_oid);
+        return new QoreStringNode(oid_hex);
+    }
+
+    // Disk mode: use standard index-based commit
+    git_index* index = nullptr;
+    int rc = git_repository_index(&index, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to get repository index");
+        return nullptr;
+    }
+
+    git_oid tree_oid;
+    rc = git_index_write_tree(&tree_oid, index);
+    git_index_free(index);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to write tree from index");
+        return nullptr;
+    }
+
+    git_tree* tree = nullptr;
+    rc = git_tree_lookup(&tree, m_repo, &tree_oid);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to look up tree");
+        return nullptr;
+    }
+
+    git_signature* sig = nullptr;
+    rc = git_signature_default(&sig, m_repo);
+    if (rc < 0) {
+        git_tree_free(tree);
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc,
+            "failed to get default signature; configure user.name and user.email");
+        return nullptr;
+    }
+
+    git_commit* parent = nullptr;
+    bool has_parent = false;
+    git_reference* head_ref = nullptr;
+    rc = git_repository_head(&head_ref, m_repo);
+    if (rc == 0) {
+        const git_oid* head_oid = git_reference_target(head_ref);
+        if (head_oid && git_commit_lookup(&parent, m_repo, head_oid) == 0) {
+            has_parent = true;
+        }
+        git_reference_free(head_ref);
+    }
+
+    git_oid commit_oid;
+    const git_commit* parents[] = {parent};
+    rc = git_commit_create(
+        &commit_oid, m_repo, "HEAD",
+        sig, sig, nullptr, message, tree,
+        has_parent ? 1 : 0,
+        has_parent ? parents : nullptr
+    );
+
+    git_signature_free(sig);
+    git_tree_free(tree);
+    if (parent) {
+        git_commit_free(parent);
+    }
+
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to create commit");
+        return nullptr;
+    }
+
+    char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+    git_oid_tostr(oid_hex, sizeof(oid_hex), &commit_oid);
+    return new QoreStringNode(oid_hex);
+}
+
+QoreStringNode* QoreGitRepository::headCommitId(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_reference* head_ref = nullptr;
+    int rc = git_repository_head(&head_ref, m_repo);
+    if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+        return nullptr;
+    }
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-REPOSITORY-ERROR", rc, "failed to get HEAD reference");
+        return nullptr;
+    }
+
+    const git_oid* oid = git_reference_target(head_ref);
+    char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+    git_oid_tostr(oid_hex, sizeof(oid_hex), oid);
+    git_reference_free(head_ref);
+    return new QoreStringNode(oid_hex);
+}
+
+// --- Status ---
+
+QoreHashNode* QoreGitRepository::getStatus(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    if (m_virtual) {
+        // In virtual mode, status = entries in m_virtual_tree not yet committed
+        ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+        int count = 0;
+        for (auto& kv : m_virtual_tree) {
+            if ((++count % 100) == 0 && qore_check_cancel(xsink, "git status")) {
+                return nullptr;
+            }
+            // All virtual tree entries are "new/modified"
+            result->setKeyValue(kv.first.c_str(), (int64)GIT_STATUS_INDEX_NEW, xsink);
+        }
+        return result.release();
+    }
+
+    // Disk mode
+    git_status_options opts;
+    git_status_options_init(&opts, GIT_STATUS_OPTIONS_VERSION);
+    opts.show = GIT_STATUS_SHOW_INDEX_AND_WORKDIR;
+    opts.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED | GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX;
+
+    git_status_list* status_list = nullptr;
+    int rc = git_status_list_new(&status_list, m_repo, &opts);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-STATUS-ERROR", rc, "failed to get status");
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+    size_t count = git_status_list_entrycount(status_list);
+    for (size_t i = 0; i < count; i++) {
+        if ((i % 100) == 0 && qore_check_cancel(xsink, "git status")) {
+            git_status_list_free(status_list);
+            return nullptr;
+        }
+        const git_status_entry* entry = git_status_byindex(status_list, i);
+        const char* path = nullptr;
+        if (entry->index_to_workdir) {
+            path = entry->index_to_workdir->new_file.path;
+        } else if (entry->head_to_index) {
+            path = entry->head_to_index->new_file.path;
+        }
+        if (path) {
+            result->setKeyValue(path, (int64)entry->status, xsink);
+        }
+    }
+
+    git_status_list_free(status_list);
+    return result.release();
+}
+
+// --- Config ---
+
+int QoreGitRepository::configSet(const char* key, const char* value, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    if (m_virtual) {
+        // In virtual mode, create an in-memory config
+        git_config* config = nullptr;
+        int rc = git_config_new(&config);
+        if (rc < 0) {
+            return git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to create config");
+        }
+        // Try to get existing config first
+        git_config* repo_config = nullptr;
+        rc = git_repository_config(&repo_config, m_repo);
+        if (rc == 0) {
+            git_config_set_string(repo_config, key, value);
+            git_config_free(repo_config);
+            git_config_free(config);
+            return 0;
+        }
+        git_config_free(config);
+        return git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to get repository config");
+    }
+
+    git_config* config = nullptr;
+    int rc = git_repository_config(&config, m_repo);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to get repository config");
+    }
+
+    rc = git_config_set_string(config, key, value);
+    git_config_free(config);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to set config value");
+    }
+    return 0;
+}
+
+QoreStringNode* QoreGitRepository::configGet(const char* key, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_config* config = nullptr;
+    int rc = git_repository_config(&config, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to get repository config");
+        return nullptr;
+    }
+
+    git_config_entry* entry = nullptr;
+    rc = git_config_get_entry(&entry, config, key);
+    if (rc == GIT_ENOTFOUND) {
+        git_config_free(config);
+        return nullptr;
+    }
+    if (rc < 0) {
+        git_config_free(config);
+        git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to get config entry");
+        return nullptr;
+    }
+
+    QoreStringNode* result = new QoreStringNode(entry->value);
+    git_config_entry_free(entry);
+    git_config_free(config);
+    return result;
+}
+
+// --- Tree Building (for virtual mode commits) ---
+
+int QoreGitRepository::buildTreeFromVirtualTree(git_oid* tree_oid, ExceptionSink* xsink) {
+    // Group files by top-level directory
+    // e.g., "config/db.yaml" -> dir "config", entry "db.yaml"
+    //        "readme.txt" -> no dir, entry "readme.txt"
+
+    struct DirEntry {
+        std::map<std::string, git_oid> blobs;        // filename -> blob oid
+        std::map<std::string, DirEntry> subdirs;     // dirname -> subtree
+    };
+
+    DirEntry root;
+
+    // Populate the directory tree structure
+    int build_count = 0;
+    for (auto& kv : m_virtual_tree) {
+        if ((++build_count % 100) == 0 && qore_check_cancel(xsink, "git commit")) {
+            return -1;
+        }
+        const std::string& path = kv.first;
+        DirEntry* current = &root;
+
+        size_t pos = 0;
+        size_t slash;
+        while ((slash = path.find('/', pos)) != std::string::npos) {
+            std::string dir = path.substr(pos, slash - pos);
+            current = &current->subdirs[dir];
+            pos = slash + 1;
+        }
+        // The remaining part is the filename
+        std::string filename = path.substr(pos);
+        current->blobs[filename] = kv.second;
+    }
+
+    // Recursively build trees bottom-up
+    std::function<int(DirEntry&, git_oid*)> buildTree = [&](DirEntry& dir, git_oid* out) -> int {
+        git_treebuilder* builder = nullptr;
+        int rc = git_treebuilder_new(&builder, m_repo, nullptr);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to create tree builder");
+            return -1;
+        }
+
+        // Add blob entries
+        for (auto& blob : dir.blobs) {
+            rc = git_treebuilder_insert(nullptr, builder, blob.first.c_str(),
+                                        &blob.second, GIT_FILEMODE_BLOB);
+            if (rc < 0) {
+                git_treebuilder_free(builder);
+                git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to insert blob into tree");
+                return -1;
+            }
+        }
+
+        // Recursively build subtrees
+        for (auto& subdir : dir.subdirs) {
+            git_oid subtree_oid;
+            if (buildTree(subdir.second, &subtree_oid) < 0) {
+                git_treebuilder_free(builder);
+                return -1;
+            }
+            rc = git_treebuilder_insert(nullptr, builder, subdir.first.c_str(),
+                                        &subtree_oid, GIT_FILEMODE_TREE);
+            if (rc < 0) {
+                git_treebuilder_free(builder);
+                git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to insert subtree");
+                return -1;
+            }
+        }
+
+        rc = git_treebuilder_write(out, builder);
+        git_treebuilder_free(builder);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to write tree");
+            return -1;
+        }
+        return 0;
+    };
+
+    return buildTree(root, tree_oid);
+}
+
+int QoreGitRepository::populateVirtualTreeFromGitTree(const git_tree* tree,
+                                                       const std::string& prefix,
+                                                       ExceptionSink* xsink) {
+    size_t count = git_tree_entrycount(tree);
+    for (size_t i = 0; i < count; i++) {
+        if ((i % 100) == 0 && qore_check_cancel(xsink, "git checkout")) {
+            return -1;
+        }
+        const git_tree_entry* entry = git_tree_entry_byindex(tree, i);
+        const char* name = git_tree_entry_name(entry);
+        std::string full_path = prefix.empty() ? name : prefix + "/" + name;
+
+        if (git_tree_entry_type(entry) == GIT_OBJECT_TREE) {
+            // Recurse into subtree
+            git_tree* subtree = nullptr;
+            int rc = git_tree_lookup(&subtree, m_repo, git_tree_entry_id(entry));
+            if (rc < 0) {
+                git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to look up subtree");
+                return -1;
+            }
+            rc = populateVirtualTreeFromGitTree(subtree, full_path, xsink);
+            git_tree_free(subtree);
+            if (rc < 0) {
+                return -1;
+            }
+        } else if (git_tree_entry_type(entry) == GIT_OBJECT_BLOB) {
+            git_oid_cpy(&m_virtual_tree[full_path], git_tree_entry_id(entry));
+        }
+    }
+    return 0;
+}

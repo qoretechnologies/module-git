@@ -1,0 +1,57 @@
+/** @mainpage Qore git Module
+
+    @tableofcontents
+
+    @section gitintro Git Module Introduction
+
+    The \c git module provides a comprehensive interface to git repositories from
+    %Qore using the libgit2 library. It supports all common git operations including
+    repository management, staging, committing, branching, tagging, diffing, merging,
+    and remote operations.
+
+    This module is released under the MIT license (see \c COPYING.MIT in the source
+    distribution for more information). The module is tagged as such in the module's
+    header (meaning it can be loaded unconditionally regardless of how the %Qore
+    library was initialized).
+
+    To use this module, use \c "%requires git" in your code.
+
+    @section gitrequirements Requirements
+
+    This module requires:
+    - libgit2 >= 1.0
+    - %Qore >= 2.0
+
+    @section gitclasses Classes Provided
+
+    The following classes are provided by this module:
+    - @ref Qore::Git::GitRepository "GitRepository": main class for interacting with git repositories
+
+    @section gitexamples Examples
+
+    @par Example: Initialize a repository and create a commit
+    @code{.py}
+%modern
+%requires git
+
+# initialize a new repo
+GitRepository repo = GitRepository::init("/tmp/test-repo");
+repo.configSet("user.name", "Test User");
+repo.configSet("user.email", "test@example.com");
+
+# create a file and commit
+File f();
+f.open(repo.workdir() + "hello.txt", O_CREAT | O_WRONLY | O_TRUNC);
+f.write("Hello, World!\n");
+f.close();
+
+repo.add("hello.txt");
+string oid = repo.commit("Initial commit");
+printf("Commit: %s\n", oid);
+    @endcode
+
+    @section gitreleasenotes Release Notes
+
+    @subsection git_1_0 git Module Version 1.0
+    - initial release
+*/
