@@ -32,6 +32,8 @@
 
 #include <git2/sys/repository.h>
 
+#include <ftw.h>
+
 #include <map>
 #include <string>
 #include <vector>
@@ -40,10 +42,9 @@
 class QoreGitRepository : public AbstractPrivateData {
 private:
     git_repository* m_repo = nullptr;
-    git_odb* m_odb = nullptr;         // owned in virtual mode only
     git_index* m_index = nullptr;     // in-memory index for virtual mode
-    std::string m_path;               // repo path (disk mode) or remote URL (virtual mode)
-    bool m_virtual = false;           // true = in-memory mode
+    std::string m_path;               // repo path (disk mode) or temp bare repo path (virtual mode)
+    bool m_virtual = false;           // true = virtual mode (temp bare repo + in-memory working tree)
     mutable QoreThreadLock m_lock;
 
     // Virtual working tree: maps path -> blob OID
@@ -58,6 +59,11 @@ private:
     //! Populates m_virtual_tree from a git_tree (recursive)
     DLLLOCAL int populateVirtualTreeFromGitTree(const git_tree* tree, const std::string& prefix,
                                                 ExceptionSink* xsink);
+
+    //! nftw callback for recursive directory removal
+    static int removePath(const char* path, const struct stat* sb, int typeflag, struct FTW* ftwbuf) {
+        return ::remove(path);
+    }
 
     //! Checks that the repo is open
     DLLLOCAL bool checkRepo(ExceptionSink* xsink) const {
@@ -78,10 +84,9 @@ protected:
             git_repository_free(m_repo);
             m_repo = nullptr;
         }
-        // In virtual mode, we own the ODB and must free it after the repo
-        if (m_odb) {
-            git_odb_free(m_odb);
-            m_odb = nullptr;
+        // In virtual mode, clean up the temp bare repo directory
+        if (m_virtual && !m_path.empty()) {
+            nftw(m_path.c_str(), removePath, 64, FTW_DEPTH | FTW_PHYS);
         }
     }
 
@@ -145,6 +150,12 @@ public:
                            ExceptionSink* xsink);
     DLLLOCAL int deleteTag(const char* name, ExceptionSink* xsink);
     DLLLOCAL QoreListNode* listTags(ExceptionSink* xsink);
+
+    // --- Remote / Network Operations ---
+    DLLLOCAL int addRemote(const char* name, const char* url, ExceptionSink* xsink);
+    DLLLOCAL int removeRemote(const char* name, ExceptionSink* xsink);
+    DLLLOCAL int fetch(const char* remote_name, ExceptionSink* xsink);
+    DLLLOCAL int push(const char* remote_name, const char* refspec, ExceptionSink* xsink);
 
     // --- Access to internals (for child classes) ---
     DLLLOCAL git_repository* getRepo() const { return m_repo; }

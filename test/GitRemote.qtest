@@ -1,0 +1,142 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitRemote.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitRemoteTest
+
+public class GitRemoteTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitRemoteTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-remote-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+        addTestCase("disk: add/remove remote", \testAddRemoveRemote());
+        addTestCase("disk: push and fetch between local repos", \testPushFetch());
+        addTestCase("virtual: fetch from local bare repo", \testVirtualFetch());
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private testAddRemoveRemote() {
+        string path = m_tmpdir + "/remote-test";
+        Git::GitRepository repo = Git::GitRepository::init(path);
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+
+        # Add a remote
+        repo.addRemote("upstream", "https://example.com/repo.git");
+
+        # Remove it
+        repo.removeRemote("upstream");
+
+        # Removing non-existent remote should throw
+        assertThrows("GIT-REMOTE-ERROR", \repo.removeRemote(), ("nonexistent",),
+            "removing non-existent remote throws");
+    }
+
+    private testPushFetch() {
+        # Create a bare "server" repo
+        string bare_path = m_tmpdir + "/server.git";
+        Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+
+        # Create a "client" repo with the bare as remote
+        string client_path = m_tmpdir + "/client";
+        Git::GitRepository client = Git::GitRepository::init(client_path);
+        client.configSet("user.name", "Client");
+        client.configSet("user.email", "client@test.com");
+        client.addRemote("origin", bare_path);
+
+        # Create a commit and push
+        {
+            File f();
+            f.open(client_path + "/hello.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("Hello from client\n");
+        }
+        client.add("hello.txt");
+        client.commit("Initial from client");
+        client.push();
+
+        # Create a second client and fetch
+        string client2_path = m_tmpdir + "/client2";
+        Git::GitRepository client2 = Git::GitRepository::init(client2_path);
+        client2.configSet("user.name", "Client2");
+        client2.configSet("user.email", "client2@test.com");
+        client2.addRemote("origin", bare_path);
+        client2.fetch();
+
+        # Verify the fetched commit exists by checking remote tracking branch
+        list<string> remote_branches = client2.branches(True);
+        assertTrue(remote_branches.size() > 0, "fetched remote branches exist");
+    }
+
+    private testVirtualFetch() {
+        # Create a bare repo with a commit (using disk mode to set it up)
+        string bare_path = m_tmpdir + "/virt-server.git";
+        Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+
+        # Push a commit to the bare repo from a disk client
+        string setup_path = m_tmpdir + "/virt-setup";
+        Git::GitRepository setup = Git::GitRepository::init(setup_path);
+        setup.configSet("user.name", "Setup");
+        setup.configSet("user.email", "setup@test.com");
+        setup.addRemote("origin", bare_path);
+        {
+            File f();
+            f.open(setup_path + "/config.yaml", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("key: value\n");
+        }
+        setup.add("config.yaml");
+        setup.commit("Setup commit");
+        setup.push();
+
+        # Now create a virtual repo and fetch from the bare repo
+        Git::GitRepository virt = Git::GitRepository::createVirtual();
+        virt.addRemote("origin", bare_path);
+        virt.fetch();
+
+        # Check that we got remote branches
+        list<string> remote_branches = virt.branches(True);
+        assertTrue(remote_branches.size() > 0, "virtual repo fetched remote branches");
+
+        # Checkout the remote branch to populate virtual tree
+        # Remote branch name should be "origin/main" or "origin/master"
+        string remote_branch = remote_branches[0];
+        virt.checkout(remote_branch);
+
+        # Read the file from the virtual tree
+        *string content = virt.readFileString("config.yaml");
+        assertEq("key: value\n", content, "virtual repo reads file content fetched from remote");
+    }
+}

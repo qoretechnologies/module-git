@@ -644,3 +644,70 @@ list<hash<auto>> GitRepository::log(*int max_count, *string path) {
     return repo->log((int)max_count,
                      path ? path->c_str() : nullptr, xsink);
 }
+
+// --- Remote / Network Operations ---
+
+//! Adds a named remote to the repository
+/** @par Example:
+    @code{.py}
+repo.addRemote("origin", "git@github.com:myorg/myrepo.git");
+    @endcode
+
+    @param name the remote name (e.g., "origin")
+    @param url the remote URL
+
+    @throw GIT-REMOTE-ERROR failed to add remote
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::addRemote(string name, string url) [dom=NETWORK] {
+    repo->addRemote(name->c_str(), url->c_str(), xsink);
+}
+
+//! Removes a named remote from the repository
+/** @par Example:
+    @code{.py}
+repo.removeRemote("origin");
+    @endcode
+
+    @param name the remote name
+
+    @throw GIT-REMOTE-ERROR failed to remove remote
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::removeRemote(string name) {
+    repo->removeRemote(name->c_str(), xsink);
+}
+
+//! Fetches objects and refs from a remote
+/** @par Example:
+    @code{.py}
+repo.fetch();                # fetch from "origin"
+repo.fetch("upstream");      # fetch from named remote
+    @endcode
+
+    @param remote the remote name (default: "origin")
+
+    @throw GIT-FETCH-ERROR failed to fetch
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::fetch(*string remote) [dom=NETWORK] {
+    repo->fetch(remote ? remote->c_str() : nullptr, xsink);
+}
+
+//! Pushes commits to a remote
+/** @par Example:
+    @code{.py}
+repo.push();                                  # push current branch to origin
+repo.push("origin", "refs/heads/main:refs/heads/main");  # explicit refspec
+    @endcode
+
+    @param remote the remote name (default: "origin")
+    @param refspec the refspec to push (default: current branch)
+
+    @throw GIT-PUSH-ERROR failed to push
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+*/
+nothing GitRepository::push(*string remote, *string refspec) [dom=NETWORK] {
+    repo->push(remote ? remote->c_str() : nullptr,
+               refspec ? refspec->c_str() : nullptr, xsink);
+}

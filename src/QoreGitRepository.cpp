@@ -26,8 +26,6 @@
 */
 
 #include "QoreGitRepository.h"
-#include "QoreGitMemoryODB.h"
-#include "QoreGitMemoryRefDB.h"
 
 #include <cstring>
 #include <sys/stat.h>
@@ -52,67 +50,25 @@ QoreGitRepository::QoreGitRepository(const char* path, bool bare, ExceptionSink*
 
 QoreGitRepository::QoreGitRepository(bool virtual_mode, ExceptionSink* xsink)
     : m_virtual(true) {
-    // Create in-memory ODB
-    int rc = git_odb_new(&m_odb);
-    if (rc < 0) {
-        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory ODB");
+    // Create a temporary bare repo on disk for the object store and refdb.
+    // This is needed because libgit2's fetch/push protocol requires writepack support
+    // (pack file I/O), which only the disk-backed ODB provides.
+    // The working tree remains fully virtual — m_virtual_tree maps paths to blob OIDs.
+    char tmpdir[] = "/tmp/qore-git-virt-XXXXXX";
+    if (!mkdtemp(tmpdir)) {
+        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to create temp directory for virtual repo");
         return;
     }
+    m_path = tmpdir;
 
-    // Add memory backend
-    git_odb_backend* odb_backend = nullptr;
-    rc = qore_git_memory_odb_new(&odb_backend);
+    int rc = git_repository_init(&m_repo, tmpdir, 1);  // bare repo
     if (rc < 0) {
-        git_odb_free(m_odb);
-        m_odb = nullptr;
-        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to create memory ODB backend");
-        return;
-    }
-    rc = git_odb_add_backend(m_odb, odb_backend, 1);
-    if (rc < 0) {
-        // odb_backend is freed by git_odb_add_backend on failure
-        git_odb_free(m_odb);
-        m_odb = nullptr;
-        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to add memory ODB backend");
-        return;
-    }
-
-    // Create repo wrapping the ODB
-    rc = git_repository_wrap_odb(&m_repo, m_odb);
-    if (rc < 0) {
-        git_odb_free(m_odb);
-        m_odb = nullptr;
+        nftw(tmpdir, removePath, 64, FTW_DEPTH | FTW_PHYS);
         git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create virtual repository");
         return;
     }
 
-    // Create and set memory refdb
-    git_refdb* refdb = nullptr;
-    rc = git_refdb_new(&refdb, m_repo);
-    if (rc < 0) {
-        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create refdb");
-        return;
-    }
-
-    git_refdb_backend* refdb_backend = nullptr;
-    rc = qore_git_memory_refdb_new(&refdb_backend);
-    if (rc < 0) {
-        git_refdb_free(refdb);
-        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to create memory refdb backend");
-        return;
-    }
-
-    rc = git_refdb_set_backend(refdb, refdb_backend);
-    if (rc < 0) {
-        git_refdb_free(refdb);
-        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to set memory refdb backend");
-        return;
-    }
-
-    git_repository_set_refdb(m_repo, refdb);
-    git_refdb_free(refdb);  // repo now owns it
-
-    // Create in-memory index
+    // Create in-memory index for the virtual working tree
     rc = git_index_new(&m_index);
     if (rc < 0) {
         git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory index");
@@ -791,26 +747,6 @@ int QoreGitRepository::configSet(const char* key, const char* value, ExceptionSi
     AutoLocker al(m_lock);
     if (!checkRepo(xsink)) {
         return -1;
-    }
-
-    if (m_virtual) {
-        // In virtual mode, create an in-memory config
-        git_config* config = nullptr;
-        int rc = git_config_new(&config);
-        if (rc < 0) {
-            return git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to create config");
-        }
-        // Try to get existing config first
-        git_config* repo_config = nullptr;
-        rc = git_repository_config(&repo_config, m_repo);
-        if (rc == 0) {
-            git_config_set_string(repo_config, key, value);
-            git_config_free(repo_config);
-            git_config_free(config);
-            return 0;
-        }
-        git_config_free(config);
-        return git_raise_exception(xsink, "GIT-CONFIG-ERROR", rc, "failed to get repository config");
     }
 
     git_config* config = nullptr;
@@ -1585,4 +1521,126 @@ QoreListNode* QoreGitRepository::log(int max_count, const char* path, ExceptionS
 
     git_revwalk_free(walker);
     return result.release();
+}
+
+// --- Remote / Network Operations ---
+
+//! Transfer progress callback for cancellation support
+static int qore_git_transfer_progress_cb(const git_indexer_progress* stats, void* payload) {
+    ExceptionSink* xsink = static_cast<ExceptionSink*>(payload);
+    if (qore_check_cancel(xsink, "git transfer")) {
+        return GIT_EUSER;
+    }
+    return 0;
+}
+
+int QoreGitRepository::addRemote(const char* name, const char* url, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    git_remote* remote = nullptr;
+    int rc = git_remote_create(&remote, m_repo, name, url);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-REMOTE-ERROR", rc, "failed to add remote");
+    }
+    git_remote_free(remote);
+    return 0;
+}
+
+int QoreGitRepository::removeRemote(const char* name, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    int rc = git_remote_delete(m_repo, name);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-REMOTE-ERROR", rc, "failed to remove remote");
+    }
+    return 0;
+}
+
+int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
+
+    git_remote* remote = nullptr;
+    int rc = git_remote_lookup(&remote, m_repo, rname);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
+    }
+
+    git_fetch_options opts;
+    git_fetch_options_init(&opts, GIT_FETCH_OPTIONS_VERSION);
+    opts.callbacks.transfer_progress = qore_git_transfer_progress_cb;
+    opts.callbacks.payload = xsink;
+
+    rc = git_remote_fetch(remote, nullptr, &opts, "fetch");
+    git_remote_free(remote);
+    if (rc < 0) {
+        if (*xsink) {
+            return -1;  // cancellation — exception already set
+        }
+        return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to fetch from remote");
+    }
+
+    return 0;
+}
+
+int QoreGitRepository::push(const char* remote_name, const char* refspec, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
+
+    git_remote* remote = nullptr;
+    int rc = git_remote_lookup(&remote, m_repo, rname);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
+    }
+
+    git_push_options opts;
+    git_push_options_init(&opts, GIT_PUSH_OPTIONS_VERSION);
+    opts.callbacks.transfer_progress = qore_git_transfer_progress_cb;
+    opts.callbacks.payload = xsink;
+
+    // Build refspec
+    git_strarray refspecs;
+    std::string rs;
+    if (refspec && *refspec) {
+        rs = refspec;
+    } else {
+        // Default: push current branch
+        git_reference* head_ref = nullptr;
+        rc = git_repository_head(&head_ref, m_repo);
+        if (rc == 0) {
+            const char* head_name = git_reference_name(head_ref);
+            rs = std::string(head_name) + ":" + head_name;
+            git_reference_free(head_ref);
+        } else {
+            rs = "refs/heads/main:refs/heads/main";
+        }
+    }
+    char* rs_ptr = const_cast<char*>(rs.c_str());
+    refspecs.strings = &rs_ptr;
+    refspecs.count = 1;
+
+    rc = git_remote_push(remote, &refspecs, &opts);
+    git_remote_free(remote);
+    if (rc < 0) {
+        if (*xsink) {
+            return -1;  // cancellation
+        }
+        return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to push to remote");
+    }
+
+    return 0;
 }
