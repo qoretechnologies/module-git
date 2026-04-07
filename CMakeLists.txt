@@ -82,7 +82,13 @@ if (DEFINED ENV{DOXYGEN_EXECUTABLE})
 endif()
 
 add_library(${module_name} MODULE ${CPP_SRC} ${QPP_SOURCES})
-set(MODULE_DOX_INPUT ${CMAKE_BINARY_DIR}/mainpage.dox ${_dox_src})
+set(MODULE_DOX_INPUT
+    ${CMAKE_BINARY_DIR}/mainpage.dox
+    ${CMAKE_BINARY_DIR}/getting-started.dox
+    ${CMAKE_BINARY_DIR}/cookbook.dox
+    ${CMAKE_BINARY_DIR}/release-notes.dox
+    ${_dox_src}
+)
 qore_external_binary_module(${module_name} ${PROJECT_VERSION} ${LIBGIT2_LDFLAGS})
 
 qore_external_user_module("qlib/GitDataProvider" "")
