@@ -25,7 +25,7 @@
 %requires qore >= 2.0
 %modern
 
-%requires(reexport) RestClient
+%requires(reexport) RestClientIo
 %requires(reexport) git
 
 module GitForgeHelper {
