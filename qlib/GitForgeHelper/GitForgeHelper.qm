@@ -28,6 +28,20 @@
 %requires(reexport) RestClient
 %requires(reexport) git
 
+module GitForgeHelper {
+    version = "1.0";
+    desc = "user module for GitHub/GitLab pull request and merge request management";
+    author = "David Nichols <david@qore.org>";
+    url = "http://qore.org";
+    license = "MIT";
+}
+
+public namespace GitForgeHelper {
+    #! Forge type constants
+    public const FORGE_GITHUB = "github";
+    public const FORGE_GITLAB = "gitlab";
+}
+
 /** @mainpage GitForgeHelper Module
 
     @section gitforgehelperintro GitForgeHelper Module Introduction
@@ -52,17 +66,3 @@ hash<auto> pr = helper.createPullRequest("feature-branch", "main",
 
     @since 1.0
 */
-
-module GitForgeHelper {
-    version = "1.0";
-    desc = "user module for GitHub/GitLab pull request and merge request management";
-    author = "David Nichols <david@qore.org>";
-    url = "http://qore.org";
-    license = "MIT";
-}
-
-public namespace GitForgeHelper {
-    #! Forge type constants
-    public const FORGE_GITHUB = "github";
-    public const FORGE_GITLAB = "gitlab";
-}

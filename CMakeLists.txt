@@ -112,4 +112,40 @@ if (DOXYGEN_FOUND)
     qore_wrap_dox(QORE_DOX_SRC ${QORE_DOX_TMPL_SRC})
     add_custom_target(QORE_MOD_DOX_FILES DEPENDS ${QORE_DOX_SRC})
     add_dependencies(docs-module QORE_MOD_DOX_FILES)
+
+    # Two-phase doc build: the initial docs-module pass generates git.tag with
+    # WARN_IF_DOC_ERROR = NO to suppress unresolved user-module cross-reference
+    # warnings. User-module docs are then built with git.tag available. The
+    # final pass rebuilds binary module docs with user-module tag files so that
+    # @ref <modname>intro links from the mainpage resolve correctly.
+    file(APPEND ${CMAKE_BINARY_DIR}/Doxyfile
+        "\n# Suppress unresolved user-module cross-reference warnings in the initial pass\n"
+        "WARN_IF_DOC_ERROR = NO\n")
+
+    file(COPY_FILE ${CMAKE_BINARY_DIR}/Doxyfile ${CMAKE_BINARY_DIR}/Doxyfile.final)
+    file(APPEND ${CMAKE_BINARY_DIR}/Doxyfile.final
+        "\n# Final pass: enable user-module cross-references and re-enable doc error warnings\n"
+        "TAGFILES = "
+        "${CMAKE_BINARY_DIR}/GitDataProvider.tag=../../GitDataProvider/html "
+        "${CMAKE_BINARY_DIR}/GitConfigManager.tag=../../GitConfigManager/html "
+        "${CMAKE_BINARY_DIR}/GitForgeHelper.tag=../../GitForgeHelper/html "
+        "${CMAKE_BINARY_DIR}/GitConnections.tag=../../GitConnections/html "
+        "\n"
+        "WARN_IF_DOC_ERROR = YES\n")
+
+    add_custom_target(docs-module-final
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_BINARY_DIR}/Doxyfile.final
+        COMMAND ${QORE_DOCS_ENV} ${QORE_QDX_COMMAND} --post ${CMAKE_BINARY_DIR}/docs/${module_name}/html
+            ${CMAKE_BINARY_DIR}/docs/${module_name}/html/search
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Generating API documentation with Doxygen (final pass with user-module cross-references)"
+        VERBATIM
+    )
+    add_dependencies(docs-module-final
+        docs-GitDataProvider
+        docs-GitConfigManager
+        docs-GitForgeHelper
+        docs-GitConnections
+    )
+    add_dependencies(docs docs-module-final)
 endif()

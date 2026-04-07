@@ -28,6 +28,19 @@
 %requires(reexport) DataProvider
 %requires(reexport) git
 
+module GitConfigManager {
+    version = "1.0";
+    desc = "user module for high-level git-based configuration management with observer pattern";
+    author = "David Nichols <david@qore.org>";
+    url = "http://qore.org";
+    license = "MIT";
+}
+
+public namespace GitConfigManager {
+    #! Event fired when config files change during sync
+    public const EVENT_CONFIG_CHANGED = "config-changed";
+}
+
 /** @mainpage GitConfigManager Module
 
     @section gitconfigmanagerintro GitConfigManager Module Introduction
@@ -43,16 +56,3 @@
 
     @since 1.0
 */
-
-module GitConfigManager {
-    version = "1.0";
-    desc = "user module for high-level git-based configuration management with observer pattern";
-    author = "David Nichols <david@qore.org>";
-    url = "http://qore.org";
-    license = "MIT";
-}
-
-public namespace GitConfigManager {
-    #! Event fired when config files change during sync
-    public const EVENT_CONFIG_CHANGED = "config-changed";
-}

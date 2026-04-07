@@ -28,20 +28,6 @@
 %requires(reexport) git
 %requires(reexport) ConnectionProvider
 
-/** @mainpage GitConnections Module
-
-    @section gitconnectionsintro GitConnections Module Introduction
-
-    The \c GitConnections module provides connection management for git repositories,
-    supporting both disk-backed and virtual (in-memory) repository connections.
-
-    Connection schemes:
-    - \c gitlocal:// - for disk-backed repositories (URL is the filesystem path)
-    - \c gitvirtual:// - for virtual/in-memory repositories
-
-    @since 1.0
-*/
-
 module GitConnections {
     version = "1.0";
     desc = "user module for git connection management";
@@ -172,3 +158,17 @@ public class GitVirtualConnection inherits AbstractConnectionWithInfo {
 }
 
 }
+
+/** @mainpage GitConnections Module
+
+    @section gitconnectionsintro GitConnections Module Introduction
+
+    The \c GitConnections module provides connection management for git repositories,
+    supporting both disk-backed and virtual (in-memory) repository connections.
+
+    Connection schemes:
+    - \c gitlocal:// - for disk-backed repositories (URL is the filesystem path)
+    - \c gitvirtual:// - for virtual/in-memory repositories
+
+    @since 1.0
+*/

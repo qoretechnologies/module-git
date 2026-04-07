@@ -28,25 +28,6 @@
 %requires(reexport) DataProvider
 %requires(reexport) git
 
-/** @mainpage GitDataProvider Module
-
-    @section gitdataproviderintro GitDataProvider Module Introduction
-
-    The \c GitDataProvider module provides a data provider API for git repository operations,
-    supporting both disk-backed and virtual (in-memory) repositories.
-
-    The following data provider actions are available:
-
-    - \c read-file: Read a file from the repository
-    - \c write-file: Write a file to the repository
-    - \c list-files: List files in the repository
-    - \c commit: Create a commit
-    - \c log: Retrieve commit history
-    - \c status: Get repository status
-
-    @since 1.0
-*/
-
 module GitDataProvider {
     version = "1.0";
     desc = "user module providing a data provider API for Git repositories";
@@ -177,3 +158,22 @@ public namespace GitDataProvider {
     public const GitLogo = Qore::ReadOnlyFile::readTextFile(
         get_script_dir() + "/git-logo.svg");
 }
+
+/** @mainpage GitDataProvider Module
+
+    @section gitdataproviderintro GitDataProvider Module Introduction
+
+    The \c GitDataProvider module provides a data provider API for git repository operations,
+    supporting both disk-backed and virtual (in-memory) repositories.
+
+    The following data provider actions are available:
+
+    - \c read-file: Read a file from the repository
+    - \c write-file: Write a file to the repository
+    - \c list-files: List files in the repository
+    - \c commit: Create a commit
+    - \c log: Retrieve commit history
+    - \c status: Get repository status
+
+    @since 1.0
+*/
