@@ -48,6 +48,10 @@ public class GitConfigManagerTest inherits QUnit::Test {
         addTestCase("pending changes", \testPendingChanges());
         addTestCase("identity", \testIdentity());
         addTestCase("sync with local bare repo", \testSync());
+        addTestCase("diffEnvironments", \testDiffEnvironments());
+        addTestCase("restoreTag", \testRestoreTag());
+        addTestCase("userHistory", \testUserHistory());
+        addTestCase("proposeChanges and applyProposal", \testProposals());
 
         set_return_value(main());
     }
@@ -231,5 +235,102 @@ public class GitConfigManagerTest inherits QUnit::Test {
         # Now sync again — no new commits on remote, so no changes
         hash<auto> result2 = mgr.sync();
         assertFalse(result2.changes, "no changes on second sync");
+    }
+
+    private testDiffEnvironments() {
+        GitConfigManager::GitConfigManager mgr = setupMgr();
+
+        mgr.writeConfig("base.yaml", "base\n");
+        mgr.publish("Initial");
+
+        # Create staging branch with different config
+        mgr.createEnvironment("staging");
+        mgr.switchEnvironment("staging");
+        mgr.writeConfig("staging.yaml", "staging\n");
+        mgr.publish("Add staging config");
+
+        # Diff between main and staging
+        list<hash<auto>> changes = mgr.diffEnvironments("main", "staging");
+        assertTrue(changes.size() > 0, "diff shows changes between environments");
+
+        bool found_staging = False;
+        foreach hash<auto> entry in (changes) {
+            if (entry.path == "staging.yaml") {
+                found_staging = True;
+            }
+        }
+        assertTrue(found_staging, "staging.yaml in diff");
+    }
+
+    private testRestoreTag() {
+        GitConfigManager::GitConfigManager mgr = setupMgr();
+
+        mgr.writeConfig("config.yaml", "v1\n");
+        mgr.publish("Version 1");
+        mgr.tagState("v1.0", "Release v1.0");
+
+        # Make more changes
+        mgr.writeConfig("config.yaml", "v2\n");
+        mgr.publish("Version 2");
+        assertEq("v2\n", mgr.readConfig("config.yaml"), "at v2");
+
+        # Restore to v1.0
+        mgr.restoreTag("v1.0");
+        assertEq("v1\n", mgr.readConfig("config.yaml"), "restored to v1");
+    }
+
+    private testUserHistory() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Alice");
+        repo.configSet("user.email", "alice@test.com");
+        GitConfigManager::GitConfigManager mgr(repo);
+
+        mgr.writeConfig("a.yaml", "alice\n");
+        mgr.publish("Alice's change");
+
+        repo.configSet("user.name", "Bob");
+        repo.configSet("user.email", "bob@test.com");
+        mgr.writeConfig("b.yaml", "bob\n");
+        mgr.publish("Bob's change");
+
+        list<hash<auto>> alice_hist = mgr.userHistory("alice@test.com");
+        assertEq(1, alice_hist.size(), "alice has 1 commit");
+        assertTrue(alice_hist[0].summary.find("Alice") >= 0, "alice's commit found");
+
+        list<hash<auto>> bob_hist = mgr.userHistory("bob@test.com");
+        assertEq(1, bob_hist.size(), "bob has 1 commit");
+
+        # With max_count
+        list<hash<auto>> limited = mgr.userHistory("alice@test.com", 5);
+        assertEq(1, limited.size(), "limited still returns 1");
+    }
+
+    private testProposals() {
+        GitConfigManager::GitConfigManager mgr = setupMgr();
+
+        mgr.writeConfig("base.yaml", "base\n");
+        mgr.publish("Initial");
+
+        # Create a proposal
+        mgr.writeConfig("proposed.yaml", "proposed content\n");
+        hash<auto> proposal = mgr.proposeChanges("Add proposed config",
+            "This adds a new proposed configuration file.",
+            {"branch_name": "proposal/test-change"});
+
+        assertEq("proposal/test-change", proposal.branch_name, "branch name correct");
+        assertTrue(proposal.commit_id.val(), "commit ID set");
+        assertEq("main", proposal.base_branch, "base branch is main");
+
+        # Switch back to main and apply the proposal
+        mgr.switchEnvironment("main");
+        assertFalse(mgr.configExists("proposed.yaml"), "proposed.yaml not on main yet");
+
+        hash<auto> apply_result = mgr.applyProposal("proposal/test-change");
+        assertTrue(apply_result.head.val(), "head updated after apply");
+
+        # The proposed file should now be on main
+        assertTrue(mgr.configExists("proposed.yaml"), "proposed.yaml on main after apply");
+        assertEq("proposed content\n", mgr.readConfig("proposed.yaml"),
+            "proposed content correct");
     }
 }

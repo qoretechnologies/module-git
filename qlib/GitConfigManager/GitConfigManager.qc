@@ -229,6 +229,103 @@ public class GitConfigManager {
         return repo.tags();
     }
 
+    # --- Cross-Environment Operations ---
+
+    #! Compares config files between two environments (branches)
+    /** @param from_env the source environment (branch name)
+        @param to_env the target environment (branch name)
+        @return a list of diff entries with \c status and \c path keys
+    */
+    list<hash<auto>> diffEnvironments(string from_env, string to_env) {
+        return repo.diff(from_env, to_env);
+    }
+
+    #! Restores the working tree to the state at a given tag
+    /** @param tag_name the tag to restore to
+
+        @note This detaches HEAD. Use @ref switchEnvironment() to return to a branch.
+    */
+    restoreTag(string tag_name) {
+        repo.checkout(tag_name);
+        last_head_id = repo.headCommitId();
+    }
+
+    # --- Change Proposals ---
+
+    #! Creates a change proposal by branching, committing, and pushing
+    /** Creates a new branch from the current branch, commits any pending changes
+        with the given title and description, and pushes the branch to the remote.
+
+        @param title the proposal title (used as commit summary)
+        @param description the proposal description (appended to commit message)
+        @param opts optional settings:
+        - \c branch_name (string): custom branch name (default: auto-generated)
+        @return a hash with \c branch_name, \c commit_id, and \c base_branch
+    */
+    hash<auto> proposeChanges(string title, string description, *hash<auto> opts) {
+        string branch_name = opts.branch_name
+            ?? ("proposal/" + now_us().format("YYYYMMDDHHmmss"));
+        *string base = repo.currentBranch();
+
+        # Save pending changes (files that differ from committed state)
+        hash<string, int> pending = repo.status();
+        hash<string, string> saved_content;
+        foreach string path in (keys pending) {
+            *string content = repo.readFileString(path);
+            if (content.val()) {
+                saved_content{path} = content;
+            }
+        }
+
+        # Create proposal branch from current HEAD and switch to it
+        repo.createBranch(branch_name);
+        repo.checkout(branch_name);
+
+        # Re-apply pending changes on the proposal branch
+        foreach hash<auto> item in (saved_content.pairIterator()) {
+            repo.writeFileString(item.key, item.value);
+        }
+
+        # Commit on the proposal branch
+        string message = title + "\n\n" + description;
+        string oid = repo.commit(message);
+
+        # Switch back to the original branch
+        if (base) {
+            repo.checkout(base);
+        }
+        last_head_id = repo.headCommitId();
+
+        # Push the proposal branch
+        try {
+            repo.push("origin",
+                "refs/heads/" + branch_name + ":refs/heads/" + branch_name);
+        } catch (hash<ExceptionInfo> ex) {
+            if (ex.err != "GIT-PUSH-ERROR") {
+                rethrow;
+            }
+        }
+
+        return {
+            "branch_name": branch_name,
+            "commit_id": oid,
+            "base_branch": base,
+        };
+    }
+
+    #! Applies a change proposal by merging its branch into the current branch
+    /** @param branch_name the proposal branch to merge
+        @return a hash with \c merge_result and \c head keys
+    */
+    hash<auto> applyProposal(string branch_name) {
+        hash<auto> merge_result = repo.merge(branch_name);
+        last_head_id = repo.headCommitId();
+        return {
+            "merge_result": merge_result,
+            "head": last_head_id,
+        };
+    }
+
     # --- Identity ---
 
     #! Sets the commit identity
@@ -238,6 +335,25 @@ public class GitConfigManager {
     setIdentity(string name, string email) {
         repo.configSet("user.name", name);
         repo.configSet("user.email", email);
+    }
+
+    #! Returns commit history filtered by author email
+    /** @param user_email the author email to filter by
+        @param max_count maximum number of entries to return (default: all)
+        @return a list of commit info hashes for the specified author
+    */
+    list<hash<auto>> userHistory(string user_email, *int max_count) {
+        list<hash<auto>> all = repo.log();
+        list<hash<auto>> result = ();
+        foreach hash<auto> c in (all) {
+            if (c.author.email == user_email) {
+                result += c;
+                if (max_count && result.size() >= max_count) {
+                    break;
+                }
+            }
+        }
+        return result;
     }
 }
 

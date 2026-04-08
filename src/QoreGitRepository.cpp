@@ -1043,16 +1043,25 @@ int QoreGitRepository::checkout(const char* ref, ExceptionSink* xsink) {
         return -1;
     }
 
-    // Resolve the ref to a commit
+    // Resolve the ref to an object, then peel to a commit (handles annotated tags)
     git_object* target = nullptr;
     int rc = git_revparse_single(&target, m_repo, ref);
     if (rc < 0) {
         return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to resolve reference");
     }
 
-    git_commit* commit = nullptr;
-    rc = git_commit_lookup(&commit, m_repo, git_object_id(target));
+    // Peel to commit (handles tag → commit, commit → commit)
+    git_object* peeled = nullptr;
+    rc = git_object_peel(&peeled, target, GIT_OBJECT_COMMIT);
     git_object_free(target);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc,
+            "failed to peel reference to commit");
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, m_repo, git_object_id(peeled));
+    git_object_free(peeled);
     if (rc < 0) {
         return git_raise_exception(xsink, "GIT-CHECKOUT-ERROR", rc, "failed to look up commit");
     }
