@@ -29,6 +29,108 @@
 #include "QC_GitRepository.h"
 #include "QoreGitRepository.h"
 
+//! Git signature (author/committer) information
+/** @since git 1.0
+*/
+hashdecl Qore::Git::GitSignatureInfo {
+    //! Author or committer name
+    string name;
+
+    //! Author or committer email
+    string email;
+
+    //! Timestamp
+    date when;
+}
+
+//! Commit information as returned by @ref GitRepository::log() "log()" and @ref GitRepository::lookupCommit() "lookupCommit()"
+/** @since git 1.0
+*/
+hashdecl Qore::Git::CommitInfo {
+    //! Full hex OID of the commit (40 characters)
+    string id;
+
+    //! Short hex OID (7 characters)
+    string short_id;
+
+    //! Full commit message
+    string message;
+
+    //! First line of the commit message
+    string summary;
+
+    //! Author signature
+    hash<GitSignatureInfo> author;
+
+    //! Committer signature
+    hash<GitSignatureInfo> committer;
+
+    //! Number of parent commits (0 for root, 1 for normal, 2+ for merge)
+    int parent_count;
+
+    //! List of parent commit OIDs
+    *list<string> parent_ids;
+}
+
+//! Diff entry as returned by @ref GitRepository::diff() "diff()"
+/** @since git 1.0
+*/
+hashdecl Qore::Git::DiffEntry {
+    //! Change status: "added", "deleted", "modified", "renamed"
+    string status;
+
+    //! File path
+    string path;
+
+    //! Old file path (for renames)
+    *string old_path;
+}
+
+//! Diff statistics as returned by @ref GitRepository::diffStats() "diffStats()"
+/** @since git 1.0
+*/
+hashdecl Qore::Git::DiffStatsInfo {
+    //! Number of files changed
+    int files_changed;
+
+    //! Total lines inserted
+    int insertions;
+
+    //! Total lines deleted
+    int deletions;
+}
+
+//! Blame hunk information as returned by @ref GitRepository::blame() "blame()"
+/** @since git 1.0
+*/
+hashdecl Qore::Git::BlameHunkInfo {
+    //! Hex OID of the commit that introduced these lines
+    string commit_id;
+
+    //! Author of the commit
+    hash<GitSignatureInfo> author;
+
+    //! Original start line number in the commit that introduced the lines
+    int start_line;
+
+    //! Number of lines in this hunk
+    int lines;
+
+    //! Final start line number in the current file
+    int final_start_line;
+}
+
+//! Stash entry information as returned by @ref GitRepository::stashList() "stashList()"
+/** @since git 1.0
+*/
+hashdecl Qore::Git::StashInfo {
+    //! Stash index (0 = most recent)
+    int index;
+
+    //! Stash message
+    string message;
+}
+
 //! Information about a single conflicting file in a merge
 /** Provides all three versions of the conflicting file (ancestor, ours, theirs)
     as both binary and string data, plus commit metadata for both sides.
@@ -652,7 +754,7 @@ for (hash<auto> entry in (changes)) {
     @throw GIT-DIFF-ERROR failed to compute diff
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-list<hash<auto>> GitRepository::diff(*string from_ref, *string to_ref) {
+list<hash<DiffEntry>> GitRepository::diff(*string from_ref, *string to_ref) {
     return repo->diff(from_ref ? from_ref->c_str() : nullptr,
                       to_ref ? to_ref->c_str() : nullptr, xsink);
 }
@@ -699,7 +801,7 @@ list<hash<auto>> file_log = repo.log(NOTHING, "config/db.yaml");
     @throw GIT-LOG-ERROR failed to traverse log
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-list<hash<auto>> GitRepository::log(*int max_count, *string path) {
+list<hash<CommitInfo>> GitRepository::log(*int max_count, *string path) {
     return repo->log((int)max_count,
                      path ? path->c_str() : nullptr, xsink);
 }

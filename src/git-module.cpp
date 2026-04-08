@@ -31,6 +31,12 @@
 static QoreNamespace gitns("Qore::Git");
 
 // hashdecl global pointers — set during module init
+TypedHashDecl* hashdeclGitSignatureInfo = nullptr;
+TypedHashDecl* hashdeclCommitInfo = nullptr;
+TypedHashDecl* hashdeclDiffEntry = nullptr;
+TypedHashDecl* hashdeclDiffStatsInfo = nullptr;
+TypedHashDecl* hashdeclBlameHunkInfo = nullptr;
+TypedHashDecl* hashdeclStashInfo = nullptr;
 TypedHashDecl* hashdeclGitMergeConflict = nullptr;
 TypedHashDecl* hashdeclGitMergeResult = nullptr;
 
@@ -108,7 +114,13 @@ static void git_module_init(QoreModuleInitContext& ctx, ExceptionSink& xsink) {
     gitns.addConstant("GIT_DELTA_TYPECHANGE", (int64)GIT_DELTA_TYPECHANGE);
     gitns.addConstant("GIT_DELTA_CONFLICTED", (int64)GIT_DELTA_CONFLICTED);
 
-    // add hashdecls (must be before class init since the class references them)
+    // add hashdecls (order matters: GitSignatureInfo before CommitInfo/BlameHunkInfo)
+    hashdeclGitSignatureInfo = init_hashdecl_GitSignatureInfo(gitns);
+    hashdeclCommitInfo = init_hashdecl_CommitInfo(gitns);
+    hashdeclDiffEntry = init_hashdecl_DiffEntry(gitns);
+    hashdeclDiffStatsInfo = init_hashdecl_DiffStatsInfo(gitns);
+    hashdeclBlameHunkInfo = init_hashdecl_BlameHunkInfo(gitns);
+    hashdeclStashInfo = init_hashdecl_StashInfo(gitns);
     hashdeclGitMergeConflict = init_hashdecl_GitMergeConflict(gitns);
     hashdeclGitMergeResult = init_hashdecl_GitMergeResult(gitns);
 

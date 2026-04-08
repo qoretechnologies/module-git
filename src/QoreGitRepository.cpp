@@ -1557,13 +1557,14 @@ QoreListNode* QoreGitRepository::log(int max_count, const char* path, ExceptionS
         char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
         git_oid_tostr(oid_hex, sizeof(oid_hex), &oid);
 
-        const git_signature* author = git_commit_author(commit);
-
         ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), xsink);
         entry->setKeyValue("id", new QoreStringNode(oid_hex), xsink);
+        entry->setKeyValue("short_id", new QoreStringNode(oid_hex, 7), xsink);
         entry->setKeyValue("message", new QoreStringNode(git_commit_message(commit)), xsink);
         entry->setKeyValue("summary", new QoreStringNode(git_commit_summary(commit)), xsink);
 
+        // Author signature
+        const git_signature* author = git_commit_author(commit);
         if (author) {
             ReferenceHolder<QoreHashNode> author_hash(new QoreHashNode(autoTypeInfo), xsink);
             author_hash->setKeyValue("name", new QoreStringNode(author->name), xsink);
@@ -1573,7 +1574,31 @@ QoreListNode* QoreGitRepository::log(int max_count, const char* path, ExceptionS
             entry->setKeyValue("author", author_hash.release(), xsink);
         }
 
-        entry->setKeyValue("parent_count", (int64)git_commit_parentcount(commit), xsink);
+        // Committer signature
+        const git_signature* committer = git_commit_committer(commit);
+        if (committer) {
+            ReferenceHolder<QoreHashNode> committer_hash(new QoreHashNode(autoTypeInfo), xsink);
+            committer_hash->setKeyValue("name", new QoreStringNode(committer->name), xsink);
+            committer_hash->setKeyValue("email", new QoreStringNode(committer->email), xsink);
+            committer_hash->setKeyValue("when", DateTimeNode::makeAbsolute(
+                currentTZ(), (int64)committer->when.time, 0), xsink);
+            entry->setKeyValue("committer", committer_hash.release(), xsink);
+        }
+
+        unsigned int pcount = git_commit_parentcount(commit);
+        entry->setKeyValue("parent_count", (int64)pcount, xsink);
+
+        // Parent IDs
+        if (pcount > 0) {
+            ReferenceHolder<QoreListNode> parent_ids(new QoreListNode(stringTypeInfo), xsink);
+            for (unsigned int p = 0; p < pcount; p++) {
+                const git_oid* parent_oid = git_commit_parent_id(commit, p);
+                char parent_hex[GIT_OID_SHA1_HEXSIZE + 1];
+                git_oid_tostr(parent_hex, sizeof(parent_hex), parent_oid);
+                parent_ids->push(new QoreStringNode(parent_hex), xsink);
+            }
+            entry->setKeyValue("parent_ids", parent_ids.release(), xsink);
+        }
 
         result->push(entry.release(), xsink);
         git_commit_free(commit);
