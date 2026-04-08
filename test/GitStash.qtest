@@ -1,0 +1,168 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitStash.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitStashTest
+
+public class GitStashTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitStashTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-stash-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+
+        addTestCase("disk: stash and pop", \testStashAndPop());
+        addTestCase("disk: stash list", \testStashList());
+        addTestCase("virtual: stash rejects", \testVirtualRejects());
+        addTestCase("negative: stash nothing", \testStashNothing());
+
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private testStashAndPop() {
+        string repo_path = m_tmpdir + "/stash-repo";
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.configSet("user.name", "Stasher");
+        repo.configSet("user.email", "stash@test.com");
+
+        # Create initial commit
+        {
+            File f();
+            f.open(repo_path + "/file.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("original\n");
+        }
+        repo.add("file.txt");
+        repo.commit("Initial");
+
+        # Modify tracked file (creates dirty working directory)
+        {
+            File f();
+            f.open(repo_path + "/file.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("modified\n");
+        }
+
+        # Stash
+        string oid = repo.stash("WIP changes");
+        assertTrue(oid.val(), "stash returns OID");
+        assertEq(40, oid.size(), "stash OID is 40 hex chars");
+
+        # Working directory should be clean (reverted to last commit)
+        assertEq("original\n", repo.readFileString("file.txt"),
+            "working directory reverted after stash");
+
+        # Pop
+        repo.stashPop();
+        # Now file.txt should be modified again — read from disk
+        {
+            File f();
+            f.open(repo_path + "/file.txt");
+            string content = f.read(-1);
+            assertEq("modified\n", content, "working directory restored after pop");
+        }
+    }
+
+    private testStashList() {
+        string repo_path = m_tmpdir + "/stash-list-repo";
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.configSet("user.name", "Stasher");
+        repo.configSet("user.email", "stash@test.com");
+
+        # Initial commit
+        {
+            File f();
+            f.open(repo_path + "/file.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("base\n");
+        }
+        repo.add("file.txt");
+        repo.commit("Initial");
+
+        # Empty stash list
+        list<hash<auto>> stashes = repo.stashList();
+        assertEq(0, stashes.size(), "no stashes initially");
+
+        # Create a stash
+        {
+            File f();
+            f.open(repo_path + "/file.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("change1\n");
+        }
+        repo.stash("First stash");
+
+        stashes = repo.stashList();
+        assertEq(1, stashes.size(), "1 stash");
+        assertEq(0, stashes[0].index, "stash index 0");
+        assertTrue(stashes[0].message.find("First stash") >= 0, "stash message contains text");
+    }
+
+    private testVirtualRejects() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+
+        assertThrows("GIT-MODE-ERROR", sub () {
+            repo.stash("test");
+        }, NOTHING, "stash on virtual");
+
+        assertThrows("GIT-MODE-ERROR", sub () {
+            repo.stashPop();
+        }, NOTHING, "stashPop on virtual");
+
+        assertThrows("GIT-MODE-ERROR", sub () {
+            repo.stashList();
+        }, NOTHING, "stashList on virtual");
+    }
+
+    private testStashNothing() {
+        string repo_path = m_tmpdir + "/stash-empty-repo";
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.configSet("user.name", "Stasher");
+        repo.configSet("user.email", "stash@test.com");
+
+        # Initial commit with clean working directory
+        {
+            File f();
+            f.open(repo_path + "/file.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("clean\n");
+        }
+        repo.add("file.txt");
+        repo.commit("Initial");
+
+        # Nothing to stash should throw
+        assertThrows("GIT-STASH-ERROR", sub () {
+            repo.stash("nothing here");
+        }, NOTHING, "stash nothing throws");
+    }
+}

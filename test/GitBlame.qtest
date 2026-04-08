@@ -1,0 +1,135 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitBlame.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitBlameTest
+
+public class GitBlameTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitBlameTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-blame-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+
+        addTestCase("virtual: blame single commit", \testBlameSingleCommit());
+        addTestCase("virtual: blame multiple commits", \testBlameMultipleCommits());
+        addTestCase("disk: blame", \testDiskBlame());
+        addTestCase("negative: blame non-existent file", \testBlameNonExistent());
+
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private testBlameSingleCommit() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Blamer");
+        repo.configSet("user.email", "blame@test.com");
+
+        repo.writeFileString("test.txt", "line1\nline2\nline3\n");
+        string oid = repo.commit("Initial");
+
+        list<hash<auto>> hunks = repo.blame("test.txt");
+        assertTrue(hunks.size() > 0, "at least 1 hunk");
+
+        hash<auto> h = hunks[0];
+        assertEq(oid, h.commit_id, "blame points to initial commit");
+        assertEq("Blamer", h.author.name, "author name in blame");
+        assertEq("blame@test.com", h.author.email, "author email in blame");
+        assertEq(3, h.lines, "3 lines in hunk");
+        assertEq(1, h.final_start_line, "starts at line 1");
+    }
+
+    private testBlameMultipleCommits() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Author1");
+        repo.configSet("user.email", "a1@test.com");
+
+        repo.writeFileString("file.txt", "line1\nline2\n");
+        string oid1 = repo.commit("First");
+
+        repo.configSet("user.name", "Author2");
+        repo.configSet("user.email", "a2@test.com");
+
+        repo.writeFileString("file.txt", "line1\nmodified\nline3\n");
+        string oid2 = repo.commit("Second");
+
+        list<hash<auto>> hunks = repo.blame("file.txt");
+        assertTrue(hunks.size() >= 2, "multiple hunks for modified file");
+
+        # At least one hunk should reference each commit
+        bool has_first = False;
+        bool has_second = False;
+        foreach hash<auto> h in (hunks) {
+            if (h.commit_id == oid1) {
+                has_first = True;
+            }
+            if (h.commit_id == oid2) {
+                has_second = True;
+            }
+        }
+        assertTrue(has_first || has_second, "blame references at least one commit");
+    }
+
+    private testDiskBlame() {
+        string repo_path = m_tmpdir + "/blame-disk";
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.configSet("user.name", "DiskBlamer");
+        repo.configSet("user.email", "disk@test.com");
+
+        {
+            File f();
+            f.open(repo_path + "/code.txt", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("func1\nfunc2\nfunc3\n");
+        }
+        repo.add("code.txt");
+        repo.commit("Add code");
+
+        list<hash<auto>> hunks = repo.blame("code.txt");
+        assertTrue(hunks.size() > 0, "disk blame returns hunks");
+        assertEq("DiskBlamer", hunks[0].author.name, "disk blame author");
+    }
+
+    private testBlameNonExistent() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@test.com");
+        repo.writeFileString("f.txt", "x\n");
+        repo.commit("init");
+
+        assertThrows("GIT-BLAME-ERROR", sub () {
+            repo.blame("nonexistent.txt");
+        }, NOTHING, "blame non-existent file");
+    }
+}

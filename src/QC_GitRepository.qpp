@@ -873,6 +873,258 @@ nothing GitRepository::push(*string remote, *string refspec) [dom=NETWORK] {
                refspec ? refspec->c_str() : nullptr, xsink);
 }
 
+// --- Additional Query Methods ---
+
+//! Looks up a commit by reference, branch name, tag, or OID
+/** @par Example:
+    @code{.py}
+hash<CommitInfo> info = repo.lookupCommit("HEAD~3");
+printf("commit %s by %s: %s\n", info.short_id, info.author.name, info.summary);
+    @endcode
+
+    @param ref the reference to resolve (branch, tag, SHA, HEAD~N, etc.)
+
+    @return a @ref hash<CommitInfo> with commit details
+
+    @throw GIT-COMMIT-ERROR failed to resolve reference or look up commit
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+hash<CommitInfo> GitRepository::lookupCommit(string ref) [flags=RET_VALUE_ONLY] {
+    return repo->lookupCommit(ref->c_str(), xsink);
+}
+
+//! Returns the current repository state
+/** @par Example:
+    @code{.py}
+string state = repo.state();
+if (state == "merge") {
+    printf("Repository is in a merge state\n");
+}
+    @endcode
+
+    @return one of: \c "none", \c "merge", \c "revert", \c "revert_sequence",
+    \c "cherrypick", \c "cherrypick_sequence", \c "bisect", \c "rebase",
+    \c "rebase_interactive", \c "rebase_merge", \c "apply_mailbox",
+    \c "apply_mailbox_or_rebase"
+
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+string GitRepository::state() [flags=RET_VALUE_ONLY] {
+    return repo->getState(xsink);
+}
+
+//! Returns diff statistics between two refs
+/** @par Example:
+    @code{.py}
+hash<DiffStatsInfo> stats = repo.diffStats("main", "feature");
+printf("Changed: %d files, +%d -%d\n", stats.files_changed, stats.insertions, stats.deletions);
+    @endcode
+
+    @param from_ref the starting ref (default: empty tree)
+    @param to_ref the ending ref (default: HEAD)
+
+    @return a @ref hash<DiffStatsInfo> with files_changed, insertions, deletions
+
+    @throw GIT-DIFF-ERROR failed to compute diff stats
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+hash<DiffStatsInfo> GitRepository::diffStats(*string from_ref, *string to_ref) {
+    return repo->diffStats(from_ref ? from_ref->c_str() : nullptr,
+                           to_ref ? to_ref->c_str() : nullptr, xsink);
+}
+
+//! Returns blame information for a file
+/** @par Example:
+    @code{.py}
+list<hash<BlameHunkInfo>> hunks = repo.blame("src/main.cpp");
+for (hash<BlameHunkInfo> h in (hunks)) {
+    printf("L%d-%d: %s (%s)\n", h.final_start_line,
+        h.final_start_line + h.lines - 1, h.commit_id.substr(0, 7), h.author.name);
+}
+    @endcode
+
+    @param path the file path to blame
+    @param opts optional options:
+    - \c newest_commit (string): only consider commits up to this ref
+    - \c oldest_commit (string): only consider commits from this ref
+
+    @return a list of @ref hash<BlameHunkInfo> hunks
+
+    @throw GIT-BLAME-ERROR failed to blame file
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+list<hash<BlameHunkInfo>> GitRepository::blame(string path, *hash<auto> opts) {
+    return repo->blame(path->c_str(), opts, xsink);
+}
+
+//! Saves the current working directory state to the stash (disk mode only)
+/** @par Example:
+    @code{.py}
+string oid = repo.stash("Work in progress");
+    @endcode
+
+    @param message optional stash message
+
+    @return the hex OID of the stash commit
+
+    @throw GIT-STASH-ERROR failed to save stash or nothing to stash
+    @throw GIT-MODE-ERROR called on a virtual repository
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+string GitRepository::stash(*string message) [dom=FILESYSTEM] {
+    return repo->stash(message ? message->c_str() : nullptr, xsink);
+}
+
+//! Pops the most recent stash entry and applies it (disk mode only)
+/** @par Example:
+    @code{.py}
+repo.stashPop();
+    @endcode
+
+    @throw GIT-STASH-ERROR failed to pop stash
+    @throw GIT-MODE-ERROR called on a virtual repository
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+nothing GitRepository::stashPop() [dom=FILESYSTEM] {
+    repo->stashPop(xsink);
+}
+
+//! Lists all stash entries (disk mode only)
+/** @par Example:
+    @code{.py}
+list<hash<StashInfo>> stashes = repo.stashList();
+for (hash<StashInfo> s in (stashes)) {
+    printf("stash@{%d}: %s\n", s.index, s.message);
+}
+    @endcode
+
+    @return a list of @ref hash<StashInfo> entries
+
+    @throw GIT-STASH-ERROR failed to list stashes
+    @throw GIT-MODE-ERROR called on a virtual repository
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+list<hash<StashInfo>> GitRepository::stashList() [dom=FILESYSTEM] {
+    return repo->stashList(xsink);
+}
+
+//! Creates a virtual repository connected to a remote
+/** Convenience factory that creates a virtual repo, configures identity,
+    adds the remote, fetches, and optionally checks out a branch.
+
+    @par Example:
+    @code{.py}
+GitRepository repo = GitRepository::connectRemote("git@github.com:org/repo.git", {
+    "identity": {"name": "Bot", "email": "bot@example.com"},
+    "branch": "main",
+});
+*string content = repo.readFileString("config.yaml");
+    @endcode
+
+    @param url the remote URL
+    @param opts optional configuration:
+    - \c identity (hash): \c name and \c email for commits
+    - \c branch (string): branch to checkout after fetch
+
+    @return a new GitRepository in virtual mode connected to the remote
+
+    @throw GIT-VIRTUAL-ERROR failed to create virtual repository
+    @throw GIT-REMOTE-ERROR failed to add remote
+    @throw GIT-FETCH-ERROR failed to fetch from remote
+    @throw GIT-CHECKOUT-ERROR failed to checkout branch
+
+    @since git 1.0
+*/
+static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) [dom=NETWORK] {
+    // Create virtual repo
+    ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(true, xsink), xsink);
+    if (*xsink) {
+        return QoreValue();
+    }
+
+    // Configure identity if provided
+    if (opts) {
+        QoreValue id = opts->getKeyValue("identity");
+        if (id.getType() == NT_HASH) {
+            const QoreHashNode* identity = id.get<const QoreHashNode>();
+            QoreValue name_val = identity->getKeyValue("name");
+            QoreValue email_val = identity->getKeyValue("email");
+            if (name_val.getType() == NT_STRING) {
+                repo->configSet("user.name", name_val.get<const QoreStringNode>()->c_str(), xsink);
+                if (*xsink) {
+                    return QoreValue();
+                }
+            }
+            if (email_val.getType() == NT_STRING) {
+                repo->configSet("user.email", email_val.get<const QoreStringNode>()->c_str(), xsink);
+                if (*xsink) {
+                    return QoreValue();
+                }
+            }
+        }
+    }
+
+    // Add remote
+    repo->addRemote("origin", url->c_str(), xsink);
+    if (*xsink) {
+        return QoreValue();
+    }
+
+    // Fetch
+    repo->fetch(nullptr, xsink);
+    if (*xsink) {
+        return QoreValue();
+    }
+
+    // Checkout branch if specified, otherwise auto-detect
+    const char* branch = nullptr;
+    if (opts) {
+        QoreValue bv = opts->getKeyValue("branch");
+        if (bv.getType() == NT_STRING) {
+            branch = bv.get<const QoreStringNode>()->c_str();
+        }
+    }
+    if (branch) {
+        repo->checkout(branch, xsink);
+        if (*xsink) {
+            return QoreValue();
+        }
+    } else {
+        // Auto-detect: checkout first remote branch
+        ReferenceHolder<QoreListNode> branches(repo->listBranches(true, xsink), xsink);
+        if (*xsink) {
+            return QoreValue();
+        }
+        if (branches && branches->size() > 0) {
+            const QoreStringNode* first = branches->retrieveEntry(0).get<const QoreStringNode>();
+            if (first) {
+                repo->checkout(first->c_str(), xsink);
+                if (*xsink) {
+                    return QoreValue();
+                }
+            }
+        }
+    }
+
+    ReferenceHolder<QoreObject> rv(new QoreObject(QC_GITREPOSITORY, getProgram()), xsink);
+    rv->setPrivate(CID_GITREPOSITORY, repo.release());
+    return rv.release();
+}
+
 // --- Merge & Pull Operations ---
 
 //! Merges the specified ref into the current branch

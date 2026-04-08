@@ -1,0 +1,164 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitMisc.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitMiscTest
+
+public class GitMiscTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitMiscTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-misc-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+
+        addTestCase("lookupCommit", \testLookupCommit());
+        addTestCase("state", \testState());
+        addTestCase("diffStats", \testDiffStats());
+        addTestCase("connectRemote", \testConnectRemote());
+        addTestCase("log enriched fields", \testLogEnriched());
+
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private testLookupCommit() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Tester");
+        repo.configSet("user.email", "test@test.com");
+
+        repo.writeFileString("f.txt", "hello\n");
+        string oid = repo.commit("Test commit");
+
+        hash<auto> info = repo.lookupCommit("HEAD");
+        assertEq(oid, info.id, "lookupCommit returns correct OID");
+        assertEq(7, info.short_id.size(), "short_id is 7 chars");
+        assertEq("Test commit", info.summary, "summary matches");
+        assertEq("Tester", info.author.name, "author name");
+        assertEq("test@test.com", info.author.email, "author email");
+        assertEq("Tester", info.committer.name, "committer name");
+        assertEq(0, info.parent_count, "root commit has 0 parents");
+
+        # Second commit with parent
+        repo.writeFileString("g.txt", "world\n");
+        string oid2 = repo.commit("Second");
+        hash<auto> info2 = repo.lookupCommit(oid2);
+        assertEq(1, info2.parent_count, "second commit has 1 parent");
+        assertEq(oid, info2.parent_ids[0], "parent is first commit");
+
+        # Bad ref
+        assertThrows("GIT-COMMIT-ERROR", sub () {
+            repo.lookupCommit("nonexistent-ref-xyz");
+        }, NOTHING, "bad ref throws");
+    }
+
+    private testState() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Tester");
+        repo.configSet("user.email", "test@test.com");
+
+        repo.writeFileString("f.txt", "data\n");
+        repo.commit("init");
+
+        assertEq("none", repo.state(), "clean repo state is none");
+    }
+
+    private testDiffStats() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Tester");
+        repo.configSet("user.email", "test@test.com");
+
+        repo.writeFileString("a.txt", "line1\nline2\nline3\n");
+        string oid1 = repo.commit("Initial");
+
+        repo.writeFileString("a.txt", "line1\nmodified\nline3\n");
+        repo.writeFileString("b.txt", "new file\n");
+        string oid2 = repo.commit("Changes");
+
+        hash<auto> stats = repo.diffStats(oid1, oid2);
+        assertEq(2, stats.files_changed, "2 files changed");
+        assertTrue(stats.insertions > 0, "has insertions");
+        assertTrue(stats.deletions >= 0, "has deletions field");
+    }
+
+    private testConnectRemote() {
+        # Create a bare "server" repo
+        string bare_path = m_tmpdir + "/misc-server.git";
+        Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+
+        # Push initial content
+        string setup_path = m_tmpdir + "/misc-setup";
+        Git::GitRepository setup = Git::GitRepository::init(setup_path);
+        setup.configSet("user.name", "Setup");
+        setup.configSet("user.email", "setup@test.com");
+        setup.addRemote("origin", bare_path);
+        {
+            File f();
+            f.open(setup_path + "/data.yaml", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("key: value\n");
+        }
+        setup.add("data.yaml");
+        setup.commit("Initial");
+        setup.push();
+
+        # Use connectRemote
+        Git::GitRepository connected = Git::GitRepository::connectRemote(bare_path, {
+            "identity": {"name": "ConnBot", "email": "conn@test.com"},
+        });
+
+        assertTrue(connected.isVirtual(), "connectRemote creates virtual repo");
+        assertEq("key: value\n", connected.readFileString("data.yaml"),
+            "content readable after connectRemote");
+    }
+
+    private testLogEnriched() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Author");
+        repo.configSet("user.email", "author@test.com");
+
+        repo.writeFileString("f.txt", "content\n");
+        repo.commit("First commit");
+
+        list<hash<auto>> hist = repo.log(1);
+        assertEq(1, hist.size(), "1 commit");
+
+        hash<auto> c = hist[0];
+        assertTrue(c.short_id.val(), "short_id present");
+        assertEq(7, c.short_id.size(), "short_id is 7 chars");
+        assertTrue(c.committer.name.val(), "committer.name present");
+        assertTrue(c.committer.email.val(), "committer.email present");
+        assertTrue(c.committer.when.val(), "committer.when present");
+        assertEq(0, c.parent_count, "root commit");
+    }
+}

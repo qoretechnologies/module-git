@@ -157,6 +157,21 @@ public:
     DLLLOCAL int fetch(const char* remote_name, ExceptionSink* xsink);
     DLLLOCAL int push(const char* remote_name, const char* refspec, ExceptionSink* xsink);
 
+    // --- Additional Query Methods ---
+    DLLLOCAL QoreHashNode* lookupCommit(const char* ref, ExceptionSink* xsink);
+    DLLLOCAL QoreStringNode* getState(ExceptionSink* xsink);
+    DLLLOCAL QoreHashNode* diffStats(const char* from_ref, const char* to_ref, ExceptionSink* xsink);
+    DLLLOCAL QoreListNode* blame(const char* path, const QoreHashNode* opts, ExceptionSink* xsink);
+
+    // --- Stash Operations (disk mode only) ---
+    DLLLOCAL QoreStringNode* stash(const char* message, ExceptionSink* xsink);
+    DLLLOCAL int stashPop(ExceptionSink* xsink);
+    DLLLOCAL QoreListNode* stashList(ExceptionSink* xsink);
+
+    // --- Convenience Factory ---
+    DLLLOCAL static QoreObject* connectRemote(const char* url, const QoreHashNode* opts,
+                                               ExceptionSink* xsink);
+
     // --- Merge & Pull Operations ---
     DLLLOCAL QoreHashNode* merge(const char* ref, const QoreHashNode* opts, ExceptionSink* xsink);
     DLLLOCAL QoreHashNode* pull(const char* remote_name, const QoreHashNode* opts, ExceptionSink* xsink);

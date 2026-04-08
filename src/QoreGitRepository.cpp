@@ -1750,6 +1750,370 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
     return 0;
 }
 
+// --- Additional Query Methods ---
+
+QoreHashNode* QoreGitRepository::lookupCommit(const char* ref, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_object* target = nullptr;
+    int rc = git_revparse_single(&target, m_repo, ref);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to resolve reference");
+        return nullptr;
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, m_repo, git_object_id(target));
+    git_object_free(target);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to look up commit");
+        return nullptr;
+    }
+
+    char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+    git_oid_tostr(oid_hex, sizeof(oid_hex), git_commit_id(commit));
+
+    ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), xsink);
+    entry->setKeyValue("id", new QoreStringNode(oid_hex), xsink);
+    entry->setKeyValue("short_id", new QoreStringNode(oid_hex, 7), xsink);
+    entry->setKeyValue("message", new QoreStringNode(git_commit_message(commit)), xsink);
+    entry->setKeyValue("summary", new QoreStringNode(git_commit_summary(commit)), xsink);
+
+    const git_signature* author = git_commit_author(commit);
+    if (author) {
+        ReferenceHolder<QoreHashNode> ah(new QoreHashNode(autoTypeInfo), xsink);
+        ah->setKeyValue("name", new QoreStringNode(author->name), xsink);
+        ah->setKeyValue("email", new QoreStringNode(author->email), xsink);
+        ah->setKeyValue("when", DateTimeNode::makeAbsolute(
+            currentTZ(), (int64)author->when.time, 0), xsink);
+        entry->setKeyValue("author", ah.release(), xsink);
+    }
+
+    const git_signature* committer = git_commit_committer(commit);
+    if (committer) {
+        ReferenceHolder<QoreHashNode> ch(new QoreHashNode(autoTypeInfo), xsink);
+        ch->setKeyValue("name", new QoreStringNode(committer->name), xsink);
+        ch->setKeyValue("email", new QoreStringNode(committer->email), xsink);
+        ch->setKeyValue("when", DateTimeNode::makeAbsolute(
+            currentTZ(), (int64)committer->when.time, 0), xsink);
+        entry->setKeyValue("committer", ch.release(), xsink);
+    }
+
+    unsigned int pcount = git_commit_parentcount(commit);
+    entry->setKeyValue("parent_count", (int64)pcount, xsink);
+
+    if (pcount > 0) {
+        ReferenceHolder<QoreListNode> parent_ids(new QoreListNode(stringTypeInfo), xsink);
+        for (unsigned int p = 0; p < pcount; p++) {
+            const git_oid* parent_oid = git_commit_parent_id(commit, p);
+            char parent_hex[GIT_OID_SHA1_HEXSIZE + 1];
+            git_oid_tostr(parent_hex, sizeof(parent_hex), parent_oid);
+            parent_ids->push(new QoreStringNode(parent_hex), xsink);
+        }
+        entry->setKeyValue("parent_ids", parent_ids.release(), xsink);
+    }
+
+    git_commit_free(commit);
+    return entry.release();
+}
+
+QoreStringNode* QoreGitRepository::getState(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    int state = git_repository_state(m_repo);
+    const char* name;
+    switch (state) {
+        case GIT_REPOSITORY_STATE_NONE: name = "none"; break;
+        case GIT_REPOSITORY_STATE_MERGE: name = "merge"; break;
+        case GIT_REPOSITORY_STATE_REVERT: name = "revert"; break;
+        case GIT_REPOSITORY_STATE_REVERT_SEQUENCE: name = "revert_sequence"; break;
+        case GIT_REPOSITORY_STATE_CHERRYPICK: name = "cherrypick"; break;
+        case GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE: name = "cherrypick_sequence"; break;
+        case GIT_REPOSITORY_STATE_BISECT: name = "bisect"; break;
+        case GIT_REPOSITORY_STATE_REBASE: name = "rebase"; break;
+        case GIT_REPOSITORY_STATE_REBASE_INTERACTIVE: name = "rebase_interactive"; break;
+        case GIT_REPOSITORY_STATE_REBASE_MERGE: name = "rebase_merge"; break;
+        case GIT_REPOSITORY_STATE_APPLY_MAILBOX: name = "apply_mailbox"; break;
+        case GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE: name = "apply_mailbox_or_rebase"; break;
+        default: name = "unknown"; break;
+    }
+    return new QoreStringNode(name);
+}
+
+QoreHashNode* QoreGitRepository::diffStats(const char* from_ref, const char* to_ref,
+                                            ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    // Resolve from_ref to tree (nullptr = empty tree)
+    git_tree* from_tree = nullptr;
+    if (from_ref && *from_ref) {
+        git_object* obj = nullptr;
+        int rc = git_revparse_single(&obj, m_repo, from_ref);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve from_ref");
+            return nullptr;
+        }
+        git_commit* c = nullptr;
+        rc = git_commit_lookup(&c, m_repo, git_object_id(obj));
+        git_object_free(obj);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to look up from commit");
+            return nullptr;
+        }
+        rc = git_commit_tree(&from_tree, c);
+        git_commit_free(c);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to get from tree");
+            return nullptr;
+        }
+    }
+
+    // Resolve to_ref to tree (nullptr = HEAD)
+    git_tree* to_tree = nullptr;
+    {
+        const char* ref = (to_ref && *to_ref) ? to_ref : "HEAD";
+        git_object* obj = nullptr;
+        int rc = git_revparse_single(&obj, m_repo, ref);
+        if (rc < 0) {
+            if (from_tree) {
+                git_tree_free(from_tree);
+            }
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve to_ref");
+            return nullptr;
+        }
+        git_commit* c = nullptr;
+        rc = git_commit_lookup(&c, m_repo, git_object_id(obj));
+        git_object_free(obj);
+        if (rc < 0) {
+            if (from_tree) {
+                git_tree_free(from_tree);
+            }
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to look up to commit");
+            return nullptr;
+        }
+        rc = git_commit_tree(&to_tree, c);
+        git_commit_free(c);
+        if (rc < 0) {
+            if (from_tree) {
+                git_tree_free(from_tree);
+            }
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to get to tree");
+            return nullptr;
+        }
+    }
+
+    git_diff* d = nullptr;
+    int rc = git_diff_tree_to_tree(&d, m_repo, from_tree, to_tree, nullptr);
+    if (from_tree) {
+        git_tree_free(from_tree);
+    }
+    git_tree_free(to_tree);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to compute diff");
+        return nullptr;
+    }
+
+    git_diff_stats* stats = nullptr;
+    rc = git_diff_get_stats(&stats, d);
+    git_diff_free(d);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to get diff stats");
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+    result->setKeyValue("files_changed", (int64)git_diff_stats_files_changed(stats), xsink);
+    result->setKeyValue("insertions", (int64)git_diff_stats_insertions(stats), xsink);
+    result->setKeyValue("deletions", (int64)git_diff_stats_deletions(stats), xsink);
+    git_diff_stats_free(stats);
+
+    return result.release();
+}
+
+QoreListNode* QoreGitRepository::blame(const char* path, const QoreHashNode* opts,
+                                        ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+
+    git_blame_options blame_opts;
+    git_blame_options_init(&blame_opts, GIT_BLAME_OPTIONS_VERSION);
+
+    // Parse options
+    if (opts) {
+        QoreValue v = opts->getKeyValue("newest_commit");
+        if (v.getType() == NT_STRING) {
+            git_object* obj = nullptr;
+            int rc = git_revparse_single(&obj, m_repo, v.get<const QoreStringNode>()->c_str());
+            if (rc < 0) {
+                git_raise_exception(xsink, "GIT-BLAME-ERROR", rc,
+                    "failed to resolve newest_commit");
+                return nullptr;
+            }
+            git_oid_cpy(&blame_opts.newest_commit, git_object_id(obj));
+            git_object_free(obj);
+        }
+        v = opts->getKeyValue("oldest_commit");
+        if (v.getType() == NT_STRING) {
+            git_object* obj = nullptr;
+            int rc = git_revparse_single(&obj, m_repo, v.get<const QoreStringNode>()->c_str());
+            if (rc < 0) {
+                git_raise_exception(xsink, "GIT-BLAME-ERROR", rc,
+                    "failed to resolve oldest_commit");
+                return nullptr;
+            }
+            git_oid_cpy(&blame_opts.oldest_commit, git_object_id(obj));
+            git_object_free(obj);
+        }
+    }
+
+    git_blame* bl = nullptr;
+    int rc = git_blame_file(&bl, m_repo, path, &blame_opts);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-BLAME-ERROR", rc, "failed to blame file");
+        return nullptr;
+    }
+
+    uint32_t hunk_count = git_blame_get_hunk_count(bl);
+    ReferenceHolder<QoreListNode> result(new QoreListNode(autoHashTypeInfo), xsink);
+
+    for (uint32_t i = 0; i < hunk_count; i++) {
+        if ((i % 100) == 0 && qore_check_cancel(xsink, "git blame")) {
+            git_blame_free(bl);
+            return nullptr;
+        }
+
+        const git_blame_hunk* hunk = git_blame_get_hunk_byindex(bl, i);
+        if (!hunk) {
+            continue;
+        }
+
+        ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), xsink);
+
+        char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+        git_oid_tostr(oid_hex, sizeof(oid_hex), &hunk->final_commit_id);
+        entry->setKeyValue("commit_id", new QoreStringNode(oid_hex), xsink);
+
+        if (hunk->final_signature) {
+            ReferenceHolder<QoreHashNode> ah(new QoreHashNode(autoTypeInfo), xsink);
+            ah->setKeyValue("name",
+                new QoreStringNode(hunk->final_signature->name ? hunk->final_signature->name : ""),
+                xsink);
+            ah->setKeyValue("email",
+                new QoreStringNode(hunk->final_signature->email ? hunk->final_signature->email : ""),
+                xsink);
+            ah->setKeyValue("when", DateTimeNode::makeAbsolute(
+                currentTZ(), (int64)hunk->final_signature->when.time, 0), xsink);
+            entry->setKeyValue("author", ah.release(), xsink);
+        }
+
+        entry->setKeyValue("start_line", (int64)hunk->orig_start_line_number, xsink);
+        entry->setKeyValue("lines", (int64)hunk->lines_in_hunk, xsink);
+        entry->setKeyValue("final_start_line", (int64)hunk->final_start_line_number, xsink);
+
+        result->push(entry.release(), xsink);
+    }
+
+    git_blame_free(bl);
+    return result.release();
+}
+
+// --- Stash Operations (disk mode only) ---
+
+QoreStringNode* QoreGitRepository::stash(const char* message, ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+    if (m_virtual) {
+        xsink->raiseException("GIT-MODE-ERROR", "stash is not supported in virtual mode");
+        return nullptr;
+    }
+
+    git_signature* sig = nullptr;
+    int rc = git_signature_default(&sig, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-STASH-ERROR", rc,
+            "failed to get default signature; configure user.name and user.email");
+        return nullptr;
+    }
+
+    git_oid stash_oid;
+    rc = git_stash_save(&stash_oid, m_repo, sig, message, GIT_STASH_DEFAULT);
+    git_signature_free(sig);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-STASH-ERROR", rc, "failed to save stash");
+        return nullptr;
+    }
+
+    char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+    git_oid_tostr(oid_hex, sizeof(oid_hex), &stash_oid);
+    return new QoreStringNode(oid_hex);
+}
+
+int QoreGitRepository::stashPop(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+    if (m_virtual) {
+        xsink->raiseException("GIT-MODE-ERROR", "stash is not supported in virtual mode");
+        return -1;
+    }
+
+    int rc = git_stash_pop(m_repo, 0, nullptr);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-STASH-ERROR", rc, "failed to pop stash");
+    }
+    return 0;
+}
+
+// Callback for git_stash_foreach
+struct StashForeachData {
+    QoreListNode* list;
+    ExceptionSink* xsink;
+};
+
+static int stash_foreach_cb(size_t index, const char* message, const git_oid* stash_id,
+                             void* payload) {
+    StashForeachData* data = static_cast<StashForeachData*>(payload);
+    ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), data->xsink);
+    entry->setKeyValue("index", (int64)index, data->xsink);
+    entry->setKeyValue("message", new QoreStringNode(message ? message : ""), data->xsink);
+    data->list->push(entry.release(), data->xsink);
+    return 0;
+}
+
+QoreListNode* QoreGitRepository::stashList(ExceptionSink* xsink) {
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+    if (m_virtual) {
+        xsink->raiseException("GIT-MODE-ERROR", "stash is not supported in virtual mode");
+        return nullptr;
+    }
+
+    ReferenceHolder<QoreListNode> result(new QoreListNode(autoHashTypeInfo), xsink);
+    StashForeachData data{*result, xsink};
+    int rc = git_stash_foreach(m_repo, stash_foreach_cb, &data);
+    if (rc < 0 && !*xsink) {
+        git_raise_exception(xsink, "GIT-STASH-ERROR", rc, "failed to list stashes");
+        return nullptr;
+    }
+    return result.release();
+}
+
 // --- Merge & Pull Helper Methods ---
 
 BinaryNode* QoreGitRepository::lookupBlobContent(const git_oid* oid, bool has_oid,
