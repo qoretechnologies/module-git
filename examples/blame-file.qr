@@ -1,0 +1,56 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates the blame API: create a file, modify it across multiple
+# commits by different authors, and inspect blame output.
+
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+
+# First author writes the initial file
+repo.configSet("user.name", "Alice");
+repo.configSet("user.email", "alice@example.com");
+repo.writeFileString("app.conf", "# Application Config\nport=8080\nhost=localhost\n");
+string oid1 = repo.commit("Initial config by Alice");
+printf("Commit 1 by Alice: %s\n", oid1.substr(0, 7));
+
+# Second author modifies lines and adds new ones
+repo.configSet("user.name", "Bob");
+repo.configSet("user.email", "bob@example.com");
+repo.writeFileString("app.conf",
+    "# Application Config\nport=9090\nhost=prod.example.com\ntimeout=30\n");
+string oid2 = repo.commit("Update config for production");
+printf("Commit 2 by Bob:   %s\n", oid2.substr(0, 7));
+
+# Third author adds more lines
+repo.configSet("user.name", "Carol");
+repo.configSet("user.email", "carol@example.com");
+repo.writeFileString("app.conf",
+    "# Application Config\nport=9090\nhost=prod.example.com\ntimeout=30\n"
+    + "max_conn=100\nlog_level=warn\n");
+string oid3 = repo.commit("Add connection and logging settings");
+printf("Commit 3 by Carol: %s\n\n", oid3.substr(0, 7));
+
+# Blame the file
+printf("--- Blame: app.conf ---\n");
+list<hash<auto>> hunks = repo.blame("app.conf");
+foreach hash<auto> h in (hunks) {
+    printf("Lines %d-%d: %s (%s) commit %s\n",
+        h.final_start_line,
+        h.final_start_line + h.lines - 1,
+        h.author.name,
+        h.author.email,
+        h.commit_id.substr(0, 7));
+}
+
+# Show current file content with line numbers for reference
+printf("\n--- Current file content ---\n");
+string content = repo.readFileString("app.conf");
+int line_num = 1;
+foreach string line in (content.split("\n")) {
+    if (line.val()) {
+        printf("  %d: %s\n", line_num++, line);
+    }
+}
+printf("Done.\n");

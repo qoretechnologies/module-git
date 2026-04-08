@@ -1,0 +1,64 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates the GitConfigManager high-level API: writeConfig, publish,
+# environments, diffEnvironments, and userHistory.
+
+%requires git
+%requires GitConfigManager
+
+# Create a virtual repo and wrap it with GitConfigManager
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Alice");
+repo.configSet("user.email", "alice@example.com");
+GitConfigManager::GitConfigManager mgr(repo);
+
+# Write and publish configuration files
+mgr.writeConfig("config/app.yaml", "port: 8080\nlog_level: info\n");
+mgr.writeConfig("config/db.yaml", "host: localhost\npool: 5\n");
+hash<auto> pub1 = mgr.publish("Initial config setup");
+printf("Published: %s\n", pub1.id.substr(0, 7));
+
+# Create a staging environment (branch)
+mgr.createEnvironment("staging");
+mgr.switchEnvironment("staging");
+printf("Current environment: %s\n", mgr.currentEnvironment());
+
+# Modify config on staging
+mgr.writeConfig("config/app.yaml", "port: 8080\nlog_level: debug\n");
+mgr.writeConfig("config/cache.yaml", "host: redis\nttl: 300\n");
+mgr.publish("Staging: enable debug logging, add cache");
+
+# Compare environments
+printf("\n--- Diff: main vs staging ---\n");
+list<hash<auto>> changes = mgr.diffEnvironments("main", "staging");
+foreach hash<auto> entry in (changes) {
+    printf("  [%s] %s\n", entry.status, entry.path);
+}
+
+# Switch to main and view history
+mgr.switchEnvironment("main");
+printf("\nEnvironments: %y\n", mgr.environments());
+
+# Change identity and make another commit
+mgr.setIdentity("Bob", "bob@example.com");
+mgr.writeConfig("config/db.yaml", "host: prod-db\npool: 20\n");
+mgr.publish("Production DB settings");
+
+# View history filtered by author
+printf("\n--- Alice's commits ---\n");
+list<hash<auto>> alice_hist = mgr.userHistory("alice@example.com");
+foreach hash<auto> c in (alice_hist) {
+    printf("  %s\n", c.summary);
+}
+
+printf("\n--- Bob's commits ---\n");
+list<hash<auto>> bob_hist = mgr.userHistory("bob@example.com");
+foreach hash<auto> c in (bob_hist) {
+    printf("  %s\n", c.summary);
+}
+
+# Tag current state and list tags
+mgr.tagState("v1.0", "First production release");
+printf("\nTags: %y\n", mgr.listTags());
+printf("Done.\n");

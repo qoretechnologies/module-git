@@ -84,10 +84,52 @@
     printf("Remote config: %s\n", content);
     @endcode
 
+    @section gitgettingstartedconnectremote Quick Connect to Remote
+
+    The @ref Git::GitRepository::connectRemote() "connectRemote()" factory
+    combines virtual repo creation, identity setup, remote configuration,
+    fetch, and checkout in a single call:
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::connectRemote(
+        "git@github.com:org/config-repo.git", {
+        "identity": {"name": "Bot", "email": "bot@example.com"},
+        "branch": "main",
+    });
+
+    *string config = repo.readFileString("config.yaml");
+    printf("Config: %s\n", config);
+    @endcode
+
+    @section gitgettingstartedmerge Basic Merge
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Test");
+    repo.configSet("user.email", "test@test.com");
+
+    repo.writeFileString("base.txt", "content\n");
+    repo.commit("Initial");
+    repo.createBranch("feature");
+    repo.checkout("feature");
+    repo.writeFileString("feature.txt", "new\n");
+    repo.commit("Feature work");
+
+    repo.checkout("main");
+    hash<auto> result = repo.merge("feature");
+    printf("Merged: %s (fast-forward: %y)\n", result.commit_id, result.fast_forward);
+    @endcode
+
     @section gitgettingstartednext Where to Go Next
 
     - @ref gitcookbook -- complete examples for branching, tagging, diffing,
-      data providers, config management, and forge integration
+      merging, blame, stash, data providers, config management, and forge integration
     - @ref Qore::Git::GitRepository "GitRepository class reference" --
       full API documentation
 */

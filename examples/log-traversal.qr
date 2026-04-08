@@ -1,0 +1,60 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates log() with max_count and path filter, showing enriched output
+# including short_id, committer info, and parent_ids.
+
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Log Demo");
+repo.configSet("user.email", "log@example.com");
+
+# Build a commit history
+repo.writeFileString("config/db.yaml", "host: localhost\n");
+repo.commit("Add database config");
+
+repo.writeFileString("config/app.yaml", "port: 8080\n");
+repo.commit("Add app config");
+
+repo.writeFileString("config/db.yaml", "host: prod-db.internal\n");
+repo.commit("Update DB host for production");
+
+repo.writeFileString("README.md", "# Config Repository\n");
+repo.commit("Add README");
+
+# Full log
+printf("--- Full log ---\n");
+list<hash<auto>> commits = repo.log();
+foreach hash<auto> c in (commits) {
+    printf("  %s %s <%s> %s\n", c.short_id, c.author.name, c.author.email,
+        c.summary);
+    if (c.parent_ids) {
+        printf("         parents: %y\n", c.parent_ids);
+    }
+}
+
+# Limited log: most recent 2 commits
+printf("\n--- Last 2 commits ---\n");
+list<hash<auto>> recent = repo.log(2);
+foreach hash<auto> c in (recent) {
+    printf("  %s %s\n", c.short_id, c.summary);
+}
+
+# Path-filtered log: only commits touching config/db.yaml
+printf("\n--- Commits touching config/db.yaml ---\n");
+list<hash<auto>> db_log = repo.log(NOTHING, "config/db.yaml");
+foreach hash<auto> c in (db_log) {
+    printf("  %s %s (committer: %s at %y)\n", c.short_id, c.summary,
+        c.committer.name, c.committer.when);
+}
+
+# Detailed commit lookup
+printf("\n--- Detailed HEAD commit ---\n");
+hash<auto> head_info = repo.lookupCommit("HEAD");
+printf("  ID:      %s\n", head_info.id);
+printf("  Short:   %s\n", head_info.short_id);
+printf("  Summary: %s\n", head_info.summary);
+printf("  Author:  %s <%s>\n", head_info.author.name, head_info.author.email);
+printf("  Parents: %d\n", head_info.parent_count);
+printf("Done.\n");

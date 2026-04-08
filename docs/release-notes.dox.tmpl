@@ -1,5 +1,62 @@
 /** @page gitreleasenotes Release Notes
 
     @section gitv100 git Module Version 1.0.0
-    - initial release
+
+    <b>Core Repository Operations</b>
+    - dual-mode architecture: disk-backed and virtual/in-memory repositories
+    - virtual filesystem API: @ref Git::GitRepository::readFile() "readFile()",
+      @ref Git::GitRepository::writeFile() "writeFile()",
+      @ref Git::GitRepository::deleteFile() "deleteFile()",
+      @ref Git::GitRepository::listFiles() "listFiles()",
+      @ref Git::GitRepository::fileExists() "fileExists()"
+    - commit operations: @ref Git::GitRepository::commit() "commit()",
+      @ref Git::GitRepository::headCommitId() "headCommitId()",
+      @ref Git::GitRepository::lookupCommit() "lookupCommit()"
+    - branch management: @ref Git::GitRepository::createBranch() "createBranch()",
+      @ref Git::GitRepository::deleteBranch() "deleteBranch()",
+      @ref Git::GitRepository::checkout() "checkout()",
+      @ref Git::GitRepository::branches() "branches()",
+      @ref Git::GitRepository::currentBranch() "currentBranch()"
+    - tag operations: @ref Git::GitRepository::createTag() "createTag()",
+      @ref Git::GitRepository::deleteTag() "deleteTag()",
+      @ref Git::GitRepository::tags() "tags()"
+    - diff and log: @ref Git::GitRepository::diff() "diff()",
+      @ref Git::GitRepository::diffPatch() "diffPatch()",
+      @ref Git::GitRepository::diffStats() "diffStats()",
+      @ref Git::GitRepository::log() "log()"
+    - blame: @ref Git::GitRepository::blame() "blame()" with per-line commit attribution
+    - stash (disk mode): @ref Git::GitRepository::stash() "stash()",
+      @ref Git::GitRepository::stashPop() "stashPop()",
+      @ref Git::GitRepository::stashList() "stashList()"
+    - remote operations: @ref Git::GitRepository::fetch() "fetch()",
+      @ref Git::GitRepository::push() "push()",
+      @ref Git::GitRepository::addRemote() "addRemote()",
+      @ref Git::GitRepository::removeRemote() "removeRemote()"
+    - repository info: @ref Git::GitRepository::status() "status()",
+      @ref Git::GitRepository::state() "state()",
+      @ref Git::GitRepository::configGet() "configGet()",
+      @ref Git::GitRepository::configSet() "configSet()"
+
+    <b>Merge and Pull</b>
+    - @ref Git::GitRepository::merge() "merge()" with three conflict resolution strategies:
+      detect-only, strategy-based (ours/theirs), and callback-based (for AI resolution)
+    - @ref Git::GitRepository::pull() "pull()" for fetch + merge in one operation
+    - three-phase lock management for safe callback invocation during merge
+    - typed hashdecls: @ref Git::GitMergeConflict, @ref Git::GitMergeResult
+
+    <b>Convenience Factory</b>
+    - @ref Git::GitRepository::connectRemote() "connectRemote()" for creating virtual
+      repositories connected to a remote with auto-fetch and checkout
+
+    <b>Typed Hashdecls</b>
+    - @ref Git::GitSignatureInfo, @ref Git::CommitInfo, @ref Git::DiffEntry,
+      @ref Git::DiffStatsInfo, @ref Git::BlameHunkInfo, @ref Git::StashInfo
+
+    <b>User Modules</b>
+    - @ref gitdataproviderintro "GitDataProvider": data provider actions for read-file,
+      write-file, list-files, commit, log, diff, and status
+    - @ref gitconfigmanagerintro "GitConfigManager": high-level config management with
+      sync/publish, environment branches, change proposals, and observer-based change detection
+    - @ref gitforgehelperintro "GitForgeHelper": GitHub/GitLab PR/MR management
+    - @ref gitconnectionsintro "GitConnections": connection provider for disk and virtual repos
 */

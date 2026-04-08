@@ -1,0 +1,51 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates branch workflow in virtual mode: create branches, checkout,
+# commit on different branches, and list branches.
+
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Branch Demo");
+repo.configSet("user.email", "branch@example.com");
+
+# Initial commit on main
+repo.writeFileString("base.txt", "shared baseline\n");
+repo.commit("Initial commit");
+printf("Current branch: %s\n", repo.currentBranch());
+printf("Branches: %y\n", repo.branches());
+
+# Create a feature branch and switch to it
+repo.createBranch("feature-login");
+repo.checkout("feature-login");
+printf("\nSwitched to: %s\n", repo.currentBranch());
+
+# Commit on the feature branch
+repo.writeFileString("login.txt", "login module code\n");
+repo.commit("Add login module");
+
+# Create another branch from main
+repo.checkout("main");
+repo.createBranch("feature-api");
+repo.checkout("feature-api");
+
+# Commit on the API branch
+repo.writeFileString("api.txt", "REST API handler\n");
+repo.commit("Add API handler");
+
+# List all branches
+printf("\nAll branches: %y\n", repo.branches());
+
+# Show which files exist on each branch
+foreach string branch in (repo.branches()) {
+    repo.checkout(branch);
+    printf("  %s: %y\n", branch, repo.listFiles());
+}
+
+# Clean up: delete feature branches
+repo.checkout("main");
+repo.deleteBranch("feature-login");
+repo.deleteBranch("feature-api");
+printf("\nAfter cleanup: %y\n", repo.branches());
+printf("Done.\n");

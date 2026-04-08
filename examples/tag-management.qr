@@ -1,0 +1,46 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates tag operations: create annotated and lightweight tags, list,
+# and delete tags.
+
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Tag Demo");
+repo.configSet("user.email", "tag@example.com");
+
+# Create some commits to tag
+repo.writeFileString("version.txt", "0.1.0\n");
+string oid1 = repo.commit("Version 0.1.0");
+printf("Commit 1: %s\n", oid1.substr(0, 7));
+
+repo.writeFileString("version.txt", "1.0.0\n");
+string oid2 = repo.commit("Version 1.0.0");
+printf("Commit 2: %s\n", oid2.substr(0, 7));
+
+repo.writeFileString("version.txt", "1.1.0\n");
+string oid3 = repo.commit("Version 1.1.0");
+printf("Commit 3: %s\n", oid3.substr(0, 7));
+
+# Create a lightweight tag at HEAD
+repo.createTag("v1.1.0");
+printf("\nCreated lightweight tag: v1.1.0\n");
+
+# Create an annotated tag at HEAD
+repo.createTag("latest", "Latest stable release v1.1.0");
+printf("Created annotated tag: latest\n");
+
+# Create an annotated tag at a specific commit
+repo.createTag("v1.0.0", "First stable release", oid2);
+printf("Created annotated tag: v1.0.0 at commit %s\n", oid2.substr(0, 7));
+
+# List all tags
+list<string> tags = repo.tags();
+printf("\nAll tags: %y\n", tags);
+
+# Delete a tag
+repo.deleteTag("latest");
+printf("Deleted tag: latest\n");
+printf("Remaining tags: %y\n", repo.tags());
+printf("Done.\n");

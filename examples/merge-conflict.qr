@@ -1,0 +1,66 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates all 3 merge strategies: detect (report conflicts), theirs
+# (auto-resolve), and callback-based (custom resolution).
+
+%requires git
+
+# Helper to create a repo with divergent branches that conflict on shared.txt
+Git::GitRepository sub create_conflicting_repo() {
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Merge Demo");
+    repo.configSet("user.email", "merge@example.com");
+
+    repo.writeFileString("shared.txt", "original content\n");
+    repo.commit("Initial commit");
+
+    repo.createBranch("feature");
+
+    # Modify on main
+    repo.writeFileString("shared.txt", "main version\n");
+    repo.commit("Edit on main");
+
+    # Modify on feature
+    repo.checkout("feature");
+    repo.writeFileString("shared.txt", "feature version\n");
+    repo.commit("Edit on feature");
+
+    repo.checkout("main");
+    return repo;
+}
+
+# Strategy 1: "detect" - report conflicts without resolving
+printf("=== Strategy: detect ===\n");
+Git::GitRepository repo1 = create_conflicting_repo();
+hash<auto> r1 = repo1.merge("feature", {"strategy": "detect"});
+printf("Conflicts: %y, Commit: %y\n", r1.conflicts, r1.commit_id.val());
+foreach hash<auto> c in (r1.conflict_list) {
+    printf("  File: %s\n", c.path);
+    printf("  Ours:   %y\n", c.ours_content_string);
+    printf("  Theirs: %y\n", c.theirs_content_string);
+    printf("  Base:   %y\n", c.ancestor_content_string);
+}
+
+# Strategy 2: "theirs" - auto-resolve preferring the incoming branch
+printf("\n=== Strategy: theirs ===\n");
+Git::GitRepository repo2 = create_conflicting_repo();
+hash<auto> r2 = repo2.merge("feature", {"strategy": "theirs"});
+printf("Conflicts: %y, Commit: %s\n", r2.conflicts, r2.commit_id.substr(0, 7));
+printf("Content: %s", repo2.readFileString("shared.txt"));
+
+# Strategy 3: "callback" - custom resolution logic
+printf("\n=== Strategy: callback ===\n");
+Git::GitRepository repo3 = create_conflicting_repo();
+hash<auto> r3 = repo3.merge("feature", {
+    "strategy": "callback",
+    "resolver": auto sub (hash<auto> conflict) {
+        # Combine both versions with a separator
+        return "# Merged from both branches\n"
+            + conflict.ours_content_string
+            + conflict.theirs_content_string;
+    },
+});
+printf("Resolved: %y, Commit: %s\n", r3.resolved_paths, r3.commit_id.substr(0, 7));
+printf("Content:\n%s", repo3.readFileString("shared.txt"));
+printf("Done.\n");

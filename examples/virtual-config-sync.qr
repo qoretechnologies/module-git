@@ -1,0 +1,60 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates the complete virtual-mode workflow: create a virtual repo,
+# add a remote (local bare repo), fetch, read/write files, commit, and push.
+
+%requires git
+
+string bare_path = sprintf("/tmp/git-example-bare-%d", getpid());
+string setup_path = sprintf("/tmp/git-example-setup-%d", getpid());
+
+# Create a bare repo to act as the "remote server"
+Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+
+# Seed the bare repo with an initial commit via a disk repo
+Git::GitRepository setup = Git::GitRepository::init(setup_path);
+setup.configSet("user.name", "Setup User");
+setup.configSet("user.email", "setup@example.com");
+setup.addRemote("origin", bare_path);
+setup.writeFileString("config/app.yaml", "port: 8080\ntimeout: 30\n");
+setup.commit("Seed initial config");
+setup.push();
+
+# Now work entirely in virtual mode
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Virtual Bot");
+repo.configSet("user.email", "bot@example.com");
+repo.addRemote("origin", bare_path);
+
+# Fetch remote content
+repo.fetch();
+
+# Create a local branch from the remote tracking branch and check it out
+list<string> remote_branches = repo.branches(True);
+printf("Remote branches: %y\n", remote_branches);
+repo.createBranch("master", remote_branches[0]);
+repo.checkout("master");
+
+# Read a file from the fetched content
+*string content = repo.readFileString("config/app.yaml");
+printf("Fetched config:\n%s\n", content);
+
+# Modify config and add a new file
+repo.writeFileString("config/app.yaml", "port: 9090\ntimeout: 60\n");
+repo.writeFileString("config/db.yaml", "host: localhost\npool_size: 10\n");
+printf("Files in repo: %y\n", repo.listFiles());
+
+# Commit and push back to the bare repo
+string oid = repo.commit("Update app config, add db config");
+printf("Committed: %s\n", oid);
+repo.push();
+
+# Verify the push by reading from a fresh virtual repo
+*string updated = repo.readFileString("config/app.yaml");
+printf("Updated config:\n%s\n", updated);
+
+# Cleanup
+system("rm -rf " + bare_path);
+system("rm -rf " + setup_path);
+printf("Done.\n");

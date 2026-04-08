@@ -1,0 +1,60 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates fetch and push with a virtual repo: create a bare repo,
+# set up a virtual repo with remote, fetch, checkout, modify, commit, push.
+
+%requires git
+
+string bare_path = sprintf("/tmp/git-example-fetchpush-bare-%d", getpid());
+string seed_path = sprintf("/tmp/git-example-fetchpush-seed-%d", getpid());
+
+# Create and seed a bare remote repo
+Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+Git::GitRepository seed = Git::GitRepository::init(seed_path);
+seed.configSet("user.name", "Seed");
+seed.configSet("user.email", "seed@example.com");
+seed.addRemote("origin", bare_path);
+seed.writeFileString("services/api.yaml", "port: 3000\n");
+seed.writeFileString("services/web.yaml", "port: 8080\n");
+seed.commit("Seed services config");
+seed.push();
+
+# Set up virtual repo, add remote, and fetch
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Deployer");
+repo.configSet("user.email", "deploy@example.com");
+repo.addRemote("origin", bare_path);
+repo.fetch();
+
+# Create a local branch from the remote tracking branch
+list<string> remote_branches = repo.branches(True);
+printf("Remote branches: %y\n", remote_branches);
+repo.createBranch("master", remote_branches[0]);
+repo.checkout("master");
+
+# Read the fetched content
+printf("Files after fetch: %y\n", repo.listFiles());
+printf("API config: %s", repo.readFileString("services/api.yaml"));
+
+# Modify and add new config
+repo.writeFileString("services/api.yaml", "port: 3001\nreplicas: 3\n");
+repo.writeFileString("services/cache.yaml", "host: redis\nport: 6379\n");
+
+# Commit and push
+string oid = repo.commit("Scale API, add cache service");
+printf("Committed: %s\n", oid);
+repo.push();
+printf("Pushed to remote.\n");
+
+# Verify by fetching in a second virtual repo
+Git::GitRepository verify = Git::GitRepository::createVirtual();
+verify.addRemote("origin", bare_path);
+verify.fetch();
+verify.checkout(verify.branches(True)[0]);
+printf("Verified API config:\n%s", verify.readFileString("services/api.yaml"));
+
+# Cleanup
+system("rm -rf " + bare_path);
+system("rm -rf " + seed_path);
+printf("Done.\n");

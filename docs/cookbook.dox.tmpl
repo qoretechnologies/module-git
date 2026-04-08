@@ -111,6 +111,107 @@
     repo.push();
     @endcode
 
+    @section gitcookbookmerge Merge with Conflict Resolution
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Test");
+    repo.configSet("user.email", "test@test.com");
+
+    repo.writeFileString("shared.txt", "original\n");
+    repo.commit("Initial");
+    repo.createBranch("feature");
+
+    # Diverge on main
+    repo.writeFileString("shared.txt", "main version\n");
+    repo.commit("Main change");
+
+    # Diverge on feature
+    repo.checkout("feature");
+    repo.writeFileString("shared.txt", "feature version\n");
+    repo.commit("Feature change");
+
+    # Back to main and merge with "theirs" strategy
+    repo.checkout("main");
+    hash<auto> result = repo.merge("feature", {"strategy": "theirs"});
+    printf("Merged: %s\n", result.commit_id);
+
+    # Callback-based resolution (e.g., for AI)
+    result = repo.merge("feature", {
+        "strategy": "callback",
+        "resolver": auto sub (hash<auto> conflict) {
+            return conflict.ours_content_string + conflict.theirs_content_string;
+        },
+    });
+    @endcode
+
+    @section gitcookbookblame Blame
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    repo.configSet("user.name", "Author");
+    repo.configSet("user.email", "author@example.com");
+
+    repo.writeFileString("code.txt", "line1\nline2\nline3\n");
+    repo.commit("Initial code");
+
+    list<hash<auto>> hunks = repo.blame("code.txt");
+    foreach hash<auto> h in (hunks) {
+        printf("L%d-%d: %s (%s)\n", h.final_start_line,
+            h.final_start_line + h.lines - 1, h.commit_id.substr(0, 7), h.author.name);
+    }
+    @endcode
+
+    @section gitcookbookconnectremote connectRemote
+
+    @code
+    %modern
+    %requires git
+
+    # Create a virtual repo connected to a remote in one call
+    Git::GitRepository repo = Git::GitRepository::connectRemote(
+        "git@github.com:org/config-repo.git", {
+        "identity": {"name": "ConfigBot", "email": "bot@example.com"},
+        "branch": "main",
+    });
+
+    # Read config directly
+    *string content = repo.readFileString("config.yaml");
+
+    # Modify and push back
+    repo.writeFileString("config.yaml", "updated: true\n");
+    repo.commit("Update config");
+    repo.push();
+    @endcode
+
+    @section gitcookbookstash Stash Operations (Disk Mode)
+
+    @code
+    %modern
+    %requires git
+
+    Git::GitRepository repo(".");  # open existing repo
+
+    # Save current changes to stash
+    string oid = repo.stash("Work in progress");
+    printf("Stashed: %s\n", oid);
+
+    # List stashes
+    list<hash<auto>> stashes = repo.stashList();
+    foreach hash<auto> s in (stashes) {
+        printf("stash@{%d}: %s\n", s.index, s.message);
+    }
+
+    # Pop most recent stash
+    repo.stashPop();
+    @endcode
+
     @section gitcookbookconfigmgr GitConfigManager
 
     @code

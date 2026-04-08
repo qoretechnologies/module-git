@@ -1,0 +1,69 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates stash workflow in a disk repo: create initial commit, modify
+# files, stash, verify clean state, list stashes, and pop.
+
+%requires git
+
+string repo_path = sprintf("/tmp/git-example-stash-%d", getpid());
+
+# Initialize disk repo with an initial commit
+Git::GitRepository repo = Git::GitRepository::init(repo_path);
+repo.configSet("user.name", "Stash Demo");
+repo.configSet("user.email", "stash@example.com");
+
+repo.writeFileString("config.yaml", "port: 8080\nhost: localhost\n");
+repo.commit("Initial config");
+printf("Initial commit done.\n");
+
+# Modify tracked file (creates dirty working directory)
+{
+    File f();
+    f.open(repo_path + "/config.yaml", O_WRONLY | O_TRUNC);
+    f.write("port: 9090\nhost: prod.example.com\n");
+}
+printf("Modified config.yaml\n");
+
+# Check status - file is modified
+hash<string, int> status = repo.status();
+printf("Status before stash: %y\n", keys status);
+
+# Stash the changes
+string stash_oid = repo.stash("WIP: production config changes");
+printf("\nStashed: %s\n", stash_oid.substr(0, 7));
+
+# Working directory should be clean now
+status = repo.status();
+printf("Status after stash: %d entries (clean)\n", status.size());
+
+# Verify file reverted to committed state
+*string content = repo.readFileString("config.yaml");
+printf("File content after stash: %s", content);
+
+# List stashes
+list<hash<auto>> stashes = repo.stashList();
+printf("\nStash list:\n");
+foreach hash<auto> s in (stashes) {
+    printf("  stash@{%d}: %s\n", s.index, s.message);
+}
+
+# Pop the stash to restore changes
+repo.stashPop();
+printf("\nPopped stash.\n");
+
+# Verify changes are restored (read from disk)
+{
+    File f();
+    f.open(repo_path + "/config.yaml");
+    string restored = f.read(-1);
+    printf("Restored content: %s", restored);
+}
+
+# Stash list should be empty now
+stashes = repo.stashList();
+printf("Stashes remaining: %d\n", stashes.size());
+
+# Cleanup
+system("rm -rf " + repo_path);
+printf("Done.\n");

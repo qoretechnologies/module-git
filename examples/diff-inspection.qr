@@ -1,0 +1,43 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates diff APIs: diff(), diffPatch(), and diffStats() between commits.
+
+%requires git
+
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Diff Demo");
+repo.configSet("user.email", "diff@example.com");
+
+# First commit
+repo.writeFileString("config.yaml", "port: 8080\nhost: localhost\n");
+repo.writeFileString("readme.txt", "Initial readme\n");
+string oid1 = repo.commit("Initial commit");
+printf("Commit 1: %s\n", oid1.substr(0, 7));
+
+# Second commit: modify one file, add another, delete one
+repo.writeFileString("config.yaml", "port: 9090\nhost: prod.example.com\n");
+repo.writeFileString("deploy.yaml", "replicas: 3\n");
+repo.deleteFile("readme.txt");
+string oid2 = repo.commit("Update config, add deploy, remove readme");
+printf("Commit 2: %s\n", oid2.substr(0, 7));
+
+# 1. diff() - structured list of changes
+printf("\n--- diff() ---\n");
+list<hash<auto>> changes = repo.diff(oid1, oid2);
+foreach hash<auto> entry in (changes) {
+    printf("  [%s] %s\n", entry.status, entry.path);
+}
+
+# 2. diffPatch() - unified diff output
+printf("\n--- diffPatch() ---\n");
+string patch = repo.diffPatch(oid1, oid2);
+printf("%s\n", patch);
+
+# 3. diffStats() - summary statistics
+printf("--- diffStats() ---\n");
+hash<auto> stats = repo.diffStats(oid1, oid2);
+printf("  Files changed: %d\n", stats.files_changed);
+printf("  Insertions:    +%d\n", stats.insertions);
+printf("  Deletions:     -%d\n", stats.deletions);
+printf("Done.\n");

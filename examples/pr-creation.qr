@@ -1,0 +1,70 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates GitForgeHelper for creating GitHub/GitLab pull requests.
+# NOTE: This requires a valid API token to actually execute API calls.
+# The example shows the API pattern; actual calls will fail without a token.
+
+%requires git
+%requires GitForgeHelper
+
+# Pattern 1: GitHub PR creation with token from environment
+# Requires GITHUB_TOKEN to be set; skip gracefully if missing
+*string token = ENV.GITHUB_TOKEN;
+if (!token) {
+    printf("GITHUB_TOKEN not set; showing API pattern only.\n\n");
+    printf("To create a GitHub PR, set GITHUB_TOKEN and run:\n");
+    printf("  export GITHUB_TOKEN=ghp_your_token_here\n\n");
+
+    # Show the code pattern without executing
+    printf("--- GitHub PR pattern ---\n");
+    printf("GitForgeHelper::GitForgeHelper gh(\"github\", {\n");
+    printf("    \"owner\": \"myorg\",\n");
+    printf("    \"repo\": \"myrepo\",\n");
+    printf("    \"token\": ENV.GITHUB_TOKEN,\n");
+    printf("});\n");
+    printf("hash<auto> pr = gh.createPullRequest(\n");
+    printf("    \"feature-branch\", \"main\",\n");
+    printf("    \"Add login feature\",\n");
+    printf("    \"Implements OAuth2 login flow\",\n");
+    printf(");\n");
+    printf("printf(\"PR #%%d: %%s\\n\", pr.id, pr.url);\n\n");
+
+    # Show GitLab pattern too
+    printf("--- GitLab MR pattern ---\n");
+    printf("GitForgeHelper::GitForgeHelper gl(\"gitlab\", {\n");
+    printf("    \"owner\": \"mygroup\",\n");
+    printf("    \"repo\": \"myproject\",\n");
+    printf("    \"token\": ENV.GITLAB_TOKEN,\n");
+    printf("    \"url\": \"https://gitlab.example.com\",\n");
+    printf("});\n");
+    printf("hash<auto> mr = gl.createPullRequest(\n");
+    printf("    \"feature-branch\", \"main\",\n");
+    printf("    \"Add login feature\",\n");
+    printf("    \"Implements OAuth2 login flow\",\n");
+    printf(");\n");
+    printf("printf(\"MR !%%d: %%s\\n\", mr.id, mr.url);\n\n");
+
+    # Show listing pattern
+    printf("--- List open PRs ---\n");
+    printf("list<hash<auto>> prs = gh.listPullRequests();\n");
+    printf("foreach hash<auto> p in (prs) {\n");
+    printf("    printf(\"#%%d %%s (%%s -> %%s)\\n\",\n");
+    printf("        p.id, p.title, p.head, p.base);\n");
+    printf("}\n");
+} else {
+    # Live example with a real token
+    GitForgeHelper::GitForgeHelper gh("github", {
+        "owner": "qoretechnologies",
+        "repo": "module-git",
+        "token": token,
+    });
+
+    # List existing PRs
+    list<hash<auto>> prs = gh.listPullRequests();
+    printf("Open PRs: %d\n", prs.size());
+    foreach hash<auto> p in (prs) {
+        printf("  #%d %s (%s -> %s)\n", p.id, p.title, p.head, p.base);
+    }
+}
+printf("Done.\n");

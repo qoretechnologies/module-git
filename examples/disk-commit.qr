@@ -1,0 +1,50 @@
+#!/usr/bin/env qore
+
+# Copyright (C) 2026 Qore Technologies, s.r.o.
+# Demonstrates disk-mode basics: init a repo, create files using writeFileString,
+# add, commit, and check status.
+
+%requires git
+
+string repo_path = sprintf("/tmp/git-example-disk-%d", getpid());
+
+# Initialize a new disk-backed repository
+Git::GitRepository repo = Git::GitRepository::init(repo_path);
+repo.configSet("user.name", "Demo User");
+repo.configSet("user.email", "demo@example.com");
+
+printf("Repo path: %s\n", repo.workdir());
+printf("Is empty: %y\n", repo.isEmpty());
+
+# Create files using writeFileString (writes to workdir and stages automatically)
+repo.writeFileString("README.md", "# My Project\nA demo repository.\n");
+repo.writeFileString("src/main.q", "printf(\"hello world\\n\");\n");
+
+# Check status before commit
+hash<string, int> status = repo.status();
+printf("Status before commit:\n");
+foreach hash<auto> entry in (status.pairIterator()) {
+    printf("  %s: flags=%d\n", entry.key, entry.value);
+}
+
+# Commit
+string oid = repo.commit("Initial commit");
+printf("\nCommit OID: %s\n", oid);
+printf("HEAD: %s\n", repo.headCommitId());
+
+# Status should be clean now
+status = repo.status();
+printf("Status after commit: %d entries (clean)\n", status.size());
+
+# Modify a file and check status again
+repo.writeFileString("README.md", "# My Project\nUpdated description.\n");
+status = repo.status();
+printf("Status after modify: %y\n", keys status);
+
+# Second commit
+string oid2 = repo.commit("Update README");
+printf("Second commit: %s\n", oid2);
+
+# Cleanup
+system("rm -rf " + repo_path);
+printf("Done.\n");
