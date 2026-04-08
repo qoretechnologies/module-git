@@ -1774,9 +1774,19 @@ QoreHashNode* QoreGitRepository::lookupCommit(const char* ref, ExceptionSink* xs
         return nullptr;
     }
 
-    git_commit* commit = nullptr;
-    rc = git_commit_lookup(&commit, m_repo, git_object_id(target));
+    // Peel to commit (handles annotated tags)
+    git_object* peeled = nullptr;
+    rc = git_object_peel(&peeled, target, GIT_OBJECT_COMMIT);
     git_object_free(target);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc,
+            "failed to peel reference to commit");
+        return nullptr;
+    }
+
+    git_commit* commit = nullptr;
+    rc = git_commit_lookup(&commit, m_repo, git_object_id(peeled));
+    git_object_free(peeled);
     if (rc < 0) {
         git_raise_exception(xsink, "GIT-COMMIT-ERROR", rc, "failed to look up commit");
         return nullptr;
@@ -1871,9 +1881,18 @@ QoreHashNode* QoreGitRepository::diffStats(const char* from_ref, const char* to_
             git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve from_ref");
             return nullptr;
         }
-        git_commit* c = nullptr;
-        rc = git_commit_lookup(&c, m_repo, git_object_id(obj));
+        // Peel to commit (handles annotated tags)
+        git_object* peeled = nullptr;
+        rc = git_object_peel(&peeled, obj, GIT_OBJECT_COMMIT);
         git_object_free(obj);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc,
+                "failed to peel from_ref to commit");
+            return nullptr;
+        }
+        git_commit* c = nullptr;
+        rc = git_commit_lookup(&c, m_repo, git_object_id(peeled));
+        git_object_free(peeled);
         if (rc < 0) {
             git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to look up from commit");
             return nullptr;
@@ -1899,9 +1918,21 @@ QoreHashNode* QoreGitRepository::diffStats(const char* from_ref, const char* to_
             git_raise_exception(xsink, "GIT-DIFF-ERROR", rc, "failed to resolve to_ref");
             return nullptr;
         }
-        git_commit* c = nullptr;
-        rc = git_commit_lookup(&c, m_repo, git_object_id(obj));
+        // Peel to commit (handles annotated tags)
+        git_object* peeled = nullptr;
+        rc = git_object_peel(&peeled, obj, GIT_OBJECT_COMMIT);
         git_object_free(obj);
+        if (rc < 0) {
+            if (from_tree) {
+                git_tree_free(from_tree);
+            }
+            git_raise_exception(xsink, "GIT-DIFF-ERROR", rc,
+                "failed to peel to_ref to commit");
+            return nullptr;
+        }
+        git_commit* c = nullptr;
+        rc = git_commit_lookup(&c, m_repo, git_object_id(peeled));
+        git_object_free(peeled);
         if (rc < 0) {
             if (from_tree) {
                 git_tree_free(from_tree);
@@ -2096,6 +2127,9 @@ struct StashForeachData {
 static int stash_foreach_cb(size_t index, const char* message, const git_oid* stash_id,
                              void* payload) {
     StashForeachData* data = static_cast<StashForeachData*>(payload);
+    if (qore_check_cancel(data->xsink, "git stash list")) {
+        return GIT_EUSER;
+    }
     ReferenceHolder<QoreHashNode> entry(new QoreHashNode(autoTypeInfo), data->xsink);
     entry->setKeyValue("index", (int64)index, data->xsink);
     entry->setKeyValue("message", new QoreStringNode(message ? message : ""), data->xsink);
