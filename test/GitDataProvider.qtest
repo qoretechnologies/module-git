@@ -40,6 +40,7 @@ public class GitDataProviderTest inherits QUnit::Test {
         addTestCase("commit action", \testCommit());
         addTestCase("log action", \testLog());
         addTestCase("status action", \testStatus());
+        addTestCase("diff action", \testDiff());
         addTestCase("full workflow: write, commit, log, read", \testFullWorkflow());
         addTestCase("constructor options", \testConstructorOptions());
 
@@ -147,6 +148,26 @@ public class GitDataProviderTest inherits QUnit::Test {
 
         hash<auto> result = status_dp.doRequest(NOTHING);
         assertTrue(result.status.hasKey("staged.txt"), "status shows staged file");
+    }
+
+    private testDiff() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Diff");
+        repo.configSet("user.email", "diff@test.com");
+
+        repo.writeFileString("a.txt", "line1\n");
+        string oid1 = repo.commit("First");
+
+        repo.writeFileString("b.txt", "line2\n");
+        string oid2 = repo.commit("Second");
+
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider diff_dp = dp.getChildProvider("diff");
+
+        hash<auto> result = diff_dp.doRequest({"from_ref": oid1, "to_ref": oid2});
+        assertEq(1, result.changes.size(), "diff shows 1 change");
+        assertEq("added", result.changes[0].status, "file was added");
+        assertEq("b.txt", result.changes[0].path, "correct path");
     }
 
     private testFullWorkflow() {

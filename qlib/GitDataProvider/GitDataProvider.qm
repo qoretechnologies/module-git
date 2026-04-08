@@ -119,6 +119,22 @@ module GitDataProvider {
             "output_type": new GitCommitResponseDataType(),
         });
 
+        # Register diff action
+        DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
+            "app": AppName,
+            "path": "/diff",
+            "action": "diff",
+            "action_code": DPAT_API,
+            "display_name": "Compare Refs",
+            "short_desc": "Compute diff between two refs",
+            "desc": "Computes the diff between two references (branches, tags, or commit SHAs) "
+                "and returns a list of changed files with their status",
+            "options": DataProviderActionCatalog::getActionOptionFromFields(
+                GitDiffRequestDataType::Fields,
+            ),
+            "output_type": new GitDiffResponseDataType(),
+        });
+
         # Register log action
         DataProviderActionCatalog::registerAction(<DataProviderActionInfo>{
             "app": AppName,

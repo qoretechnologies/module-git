@@ -222,6 +222,51 @@ public class GitLogResponseDataType inherits HashDataType {
     }
 }
 
+# --- Diff ---
+
+#! Request type for diff action
+public class GitDiffRequestDataType inherits HashDataType {
+    public {
+        const Fields = {
+            "from_ref": {
+                "type": SoftStringOrNothingType,
+                "display_name": "From Ref",
+                "desc": "Starting reference (branch, tag, or commit SHA); omit to diff from "
+                    "an empty tree (shows all files)",
+                "example_value": "main",
+            },
+            "to_ref": {
+                "type": SoftStringOrNothingType,
+                "display_name": "To Ref",
+                "desc": "Ending reference; defaults to `HEAD` if omitted",
+                "example_value": "feature-branch",
+            },
+        };
+    }
+
+    constructor() {
+        addQoreFields(Fields);
+    }
+}
+
+#! Response type for diff action
+public class GitDiffResponseDataType inherits HashDataType {
+    private {
+        const Fields = {
+            "changes": {
+                "type": AutoListType,
+                "display_name": "Changes",
+                "desc": "List of diff entries with `status` (added/deleted/modified/renamed), "
+                    "`path`, and optional `old_path` (for renames)",
+            },
+        };
+    }
+
+    constructor() {
+        addQoreFields(Fields);
+    }
+}
+
 # --- Status ---
 
 #! Response type for status action

@@ -60,6 +60,7 @@ public class GitDataProvider inherits AbstractDataProvider {
             "write-file": Class::forName("GitDataProvider::GitWriteFileDataProvider"),
             "list-files": Class::forName("GitDataProvider::GitListFilesDataProvider"),
             "commit": Class::forName("GitDataProvider::GitCommitDataProvider"),
+            "diff": Class::forName("GitDataProvider::GitDiffDataProvider"),
             "log": Class::forName("GitDataProvider::GitLogDataProvider"),
             "status": Class::forName("GitDataProvider::GitStatusDataProvider"),
         };
