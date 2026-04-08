@@ -26,7 +26,66 @@
 */
 
 #include "git-module.h"
+#include "QC_GitRepository.h"
 #include "QoreGitRepository.h"
+
+//! Information about a single conflicting file in a merge
+/** Provides all three versions of the conflicting file (ancestor, ours, theirs)
+    as both binary and string data, plus commit metadata for both sides.
+
+    @since git 1.0
+*/
+hashdecl Qore::Git::GitMergeConflict {
+    //! The file path in conflict
+    string path;
+
+    //! Ancestor (common base) content as binary; @ref nothing if the file was added on both sides
+    *binary ancestor_content;
+
+    //! Ancestor content as a UTF-8 string; @ref nothing if the file was added on both sides
+    *string ancestor_content_string;
+
+    //! "Our" side content as binary; @ref nothing if the file was deleted on our side
+    *binary ours_content;
+
+    //! "Our" side content as a UTF-8 string; @ref nothing if the file was deleted on our side
+    *string ours_content_string;
+
+    //! "Their" side content as binary; @ref nothing if the file was deleted on their side
+    *binary theirs_content;
+
+    //! "Their" side content as a UTF-8 string; @ref nothing if the file was deleted on their side
+    *string theirs_content_string;
+
+    //! Commit info for our side (keys: id, message, summary, author_name, author_email, author_when)
+    hash<auto> ours_commit;
+
+    //! Commit info for their side (same structure as \c ours_commit)
+    hash<auto> theirs_commit;
+}
+
+//! Result of a merge operation
+/** @since git 1.0
+*/
+hashdecl Qore::Git::GitMergeResult {
+    //! @ref True if the branches were already up-to-date (no merge needed)
+    bool up_to_date = False;
+
+    //! @ref True if a fast-forward merge was performed
+    bool fast_forward = False;
+
+    //! @ref True if conflicts were detected (some may have been resolved)
+    bool conflicts = False;
+
+    //! The hex OID of the merge commit; @ref nothing if unresolved conflicts remain
+    *string commit_id;
+
+    //! Unresolved conflicts (empty if all were resolved or no conflicts)
+    list<hash<GitMergeConflict>> conflict_list;
+
+    //! File paths that were auto-resolved or resolved by callback
+    list<string> resolved_paths;
+}
 
 //! Git repository class providing access to a local git repository
 /** @par Example:
@@ -710,4 +769,83 @@ repo.push("origin", "refs/heads/main:refs/heads/main");  # explicit refspec
 nothing GitRepository::push(*string remote, *string refspec) [dom=NETWORK] {
     repo->push(remote ? remote->c_str() : nullptr,
                refspec ? refspec->c_str() : nullptr, xsink);
+}
+
+// --- Merge & Pull Operations ---
+
+//! Merges the specified ref into the current branch
+/** Performs a git merge of the specified reference into the current HEAD.
+    Supports multiple conflict resolution strategies via the \c opts hash:
+    - \c strategy (string): \c "detect" (default), \c "ours", \c "theirs", or \c "callback"
+    - \c resolver (code): conflict resolver callback (required for \c "callback" strategy);
+      receives a @ref hash<GitMergeConflict>, returns resolved content (string/binary) or @ref nothing
+    - \c message (string): merge commit message (default: \c "Merge <ref>")
+    - \c no_commit (bool): if @ref True, do not create a merge commit even if all conflicts are resolved
+
+    @par Example:
+    @code{.py}
+# Simple merge with conflict detection
+hash<GitMergeResult> result = repo.merge("origin/main");
+if (result.conflicts) {
+    for (hash<GitMergeConflict> c in (result.conflict_list)) {
+        printf("Conflict in %s\n", c.path);
+    }
+}
+
+# Auto-resolve preferring "theirs"
+hash<GitMergeResult> result = repo.merge("feature", {"strategy": "theirs"});
+
+# AI-based callback resolution
+hash<GitMergeResult> result = repo.merge("feature", {
+    "strategy": "callback",
+    "resolver": sub (hash<GitMergeConflict> conflict) {
+        return ai_resolve(conflict.ours_content_string, conflict.theirs_content_string);
+    },
+});
+    @endcode
+
+    @param ref the branch, tag, or commit SHA to merge
+    @param opts optional merge options hash
+
+    @return a @ref hash<GitMergeResult> with the merge outcome
+
+    @throw GIT-MERGE-ERROR failed to perform merge
+    @throw GIT-MERGE-OPTION-ERROR invalid merge options (bad strategy or missing resolver)
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+hash<GitMergeResult> GitRepository::merge(string ref, *hash<auto> opts) [dom=FILESYSTEM] {
+    return repo->merge(ref->c_str(), opts, xsink);
+}
+
+//! Fetches from a remote and merges the tracking branch into the current branch
+/** Equivalent to @ref fetch() followed by @ref merge() of the remote tracking branch.
+
+    @par Example:
+    @code{.py}
+# Simple pull from origin
+hash<GitMergeResult> result = repo.pull();
+
+# Pull with AI conflict resolution
+hash<GitMergeResult> result = repo.pull("origin", {
+    "strategy": "callback",
+    "resolver": \ai_resolver(),
+});
+    @endcode
+
+    @param remote the remote name (default: "origin")
+    @param opts optional merge options hash (same keys as @ref merge())
+
+    @return a @ref hash<GitMergeResult> with the merge outcome
+
+    @throw GIT-FETCH-ERROR failed to fetch from remote
+    @throw GIT-MERGE-ERROR failed to merge
+    @throw GIT-PULL-ERROR failed to determine tracking branch or detached HEAD
+    @throw GIT-REPOSITORY-ERROR repository has been closed
+
+    @since git 1.0
+*/
+hash<GitMergeResult> GitRepository::pull(*string remote, *hash<auto> opts) [dom=NETWORK] {
+    return repo->pull(remote ? remote->c_str() : nullptr, opts, xsink);
 }

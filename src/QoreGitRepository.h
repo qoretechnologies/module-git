@@ -157,9 +157,48 @@ public:
     DLLLOCAL int fetch(const char* remote_name, ExceptionSink* xsink);
     DLLLOCAL int push(const char* remote_name, const char* refspec, ExceptionSink* xsink);
 
+    // --- Merge & Pull Operations ---
+    DLLLOCAL QoreHashNode* merge(const char* ref, const QoreHashNode* opts, ExceptionSink* xsink);
+    DLLLOCAL QoreHashNode* pull(const char* remote_name, const QoreHashNode* opts, ExceptionSink* xsink);
+
     // --- Access to internals (for child classes) ---
     DLLLOCAL git_repository* getRepo() const { return m_repo; }
     DLLLOCAL QoreThreadLock& getLock() const { return m_lock; }
+
+private:
+    //! Internal struct for collected conflict info during merge
+    struct MergeConflictInfo {
+        std::string path;
+        git_oid ancestor_oid;
+        git_oid ours_oid;
+        git_oid theirs_oid;
+        bool has_ancestor = false;
+        bool has_ours = false;
+        bool has_theirs = false;
+    };
+
+    //! Read blob content by OID; returns nullptr if OID is null/zero
+    DLLLOCAL BinaryNode* lookupBlobContent(const git_oid* oid, bool has_oid, ExceptionSink* xsink);
+
+    //! Build commit info hash (id, message, summary, author_name, author_email, author_when)
+    DLLLOCAL QoreHashNode* buildCommitInfoHash(git_commit* commit, ExceptionSink* xsink);
+
+    //! Build a GitMergeConflict hash from collected info + commits
+    DLLLOCAL QoreHashNode* buildConflictHash(const MergeConflictInfo& info,
+                                              git_commit* our_commit, git_commit* their_commit,
+                                              ExceptionSink* xsink);
+
+    //! Write resolved content into the merge index, replacing the conflict entry
+    DLLLOCAL int applyResolvedContent(const char* path, const void* data, size_t len,
+                                       git_index* merge_index, ExceptionSink* xsink);
+
+    //! Create a merge commit with two parents; updates HEAD and virtual tree
+    DLLLOCAL QoreStringNode* createMergeCommit(const char* message,
+                                                git_commit* our_commit, git_commit* their_commit,
+                                                git_index* merge_index, ExceptionSink* xsink);
+
+    //! Populate m_virtual_tree from a git_index (for post-merge)
+    DLLLOCAL int populateVirtualTreeFromIndex(git_index* index, ExceptionSink* xsink);
 };
 
 #endif // _QORE_GIT_REPOSITORY_H

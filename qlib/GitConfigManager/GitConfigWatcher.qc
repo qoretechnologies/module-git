@@ -56,18 +56,23 @@ public class GitConfigWatcher inherits AbstractWatchDataProviderBase {
 
         #! Remote name to fetch from
         string remote_name;
+
+        #! Merge options for sync operations
+        *hash<auto> merge_opts;
     }
 
     #! Creates the watcher
     /** @param repo the git repository to watch
         @param poll_interval_secs polling interval in seconds (default: 60)
         @param remote the remote name to fetch from (default: "origin")
+        @param merge_opts optional merge options for pull operations (strategy, resolver, etc.)
     */
     constructor(Git::GitRepository repo, int poll_interval_secs = 60,
-                string remote = "origin")
+                string remote = "origin", *hash<auto> merge_opts)
             : AbstractWatchDataProviderBase(poll_interval_secs) {
         self.repo = repo;
         self.remote_name = remote;
+        self.merge_opts = merge_opts;
         last_head_id = repo.headCommitId();
     }
 
@@ -80,11 +85,12 @@ public class GitConfigWatcher inherits AbstractWatchDataProviderBase {
     private pollOnce() {
         *string old_head = last_head_id;
 
-        # Fetch from remote
+        # Pull from remote (fetch + merge)
+        *hash<Git::GitMergeResult> merge_result;
         try {
-            repo.fetch(remote_name);
+            merge_result = repo.pull(remote_name, merge_opts);
         } catch (hash<ExceptionInfo> ex) {
-            # Log fetch errors but don't stop watching
+            # Log pull errors but don't stop watching
             logPollError(ex);
             return;
         }
@@ -114,7 +120,15 @@ public class GitConfigWatcher inherits AbstractWatchDataProviderBase {
             "old_head": old_head,
             "new_head": new_head,
             "changes": changes,
+            "merge_result": merge_result,
         });
+
+        # Notify about unresolved conflicts separately
+        if (merge_result.conflicts && merge_result.conflict_list) {
+            notifyObservers(EVENT_CONFIG_CONFLICT, {
+                "conflicts": merge_result.conflict_list,
+            });
+        }
     }
 
     #! Returns static provider info

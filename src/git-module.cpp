@@ -30,6 +30,10 @@
 
 static QoreNamespace gitns("Qore::Git");
 
+// hashdecl global pointers — set during module init
+TypedHashDecl* hashdeclGitMergeConflict = nullptr;
+TypedHashDecl* hashdeclGitMergeResult = nullptr;
+
 static void git_module_init(QoreModuleInitContext& ctx, ExceptionSink& xsink);
 static void git_module_ns_init(QoreNamespace* rns, QoreNamespace* qns, ExceptionSink& xsink);
 static void git_module_delete();
@@ -103,6 +107,10 @@ static void git_module_init(QoreModuleInitContext& ctx, ExceptionSink& xsink) {
     gitns.addConstant("GIT_DELTA_UNTRACKED", (int64)GIT_DELTA_UNTRACKED);
     gitns.addConstant("GIT_DELTA_TYPECHANGE", (int64)GIT_DELTA_TYPECHANGE);
     gitns.addConstant("GIT_DELTA_CONFLICTED", (int64)GIT_DELTA_CONFLICTED);
+
+    // add hashdecls (must be before class init since the class references them)
+    hashdeclGitMergeConflict = init_hashdecl_GitMergeConflict(gitns);
+    hashdeclGitMergeResult = init_hashdecl_GitMergeResult(gitns);
 
     // add classes
     gitns.addSystemClass(initGitRepositoryClass(gitns));

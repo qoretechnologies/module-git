@@ -1724,3 +1724,841 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
 
     return 0;
 }
+
+// --- Merge & Pull Helper Methods ---
+
+BinaryNode* QoreGitRepository::lookupBlobContent(const git_oid* oid, bool has_oid,
+                                                   ExceptionSink* xsink) {
+    if (!has_oid) {
+        return nullptr;
+    }
+    git_blob* blob = nullptr;
+    int rc = git_blob_lookup(&blob, m_repo, oid);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "failed to look up blob for conflict");
+        return nullptr;
+    }
+    const void* content = git_blob_rawcontent(blob);
+    git_object_size_t size = git_blob_rawsize(blob);
+    // BinaryNode takes ownership of malloc'd data
+    void* copy = malloc((size_t)size);
+    if (!copy) {
+        git_blob_free(blob);
+        xsink->raiseException("GIT-MERGE-ERROR", "failed to allocate %zu bytes for blob content",
+            (size_t)size);
+        return nullptr;
+    }
+    memcpy(copy, content, (size_t)size);
+    BinaryNode* result = new BinaryNode(copy, (size_t)size);
+    git_blob_free(blob);
+    return result;
+}
+
+QoreHashNode* QoreGitRepository::buildCommitInfoHash(git_commit* commit, ExceptionSink* xsink) {
+    ReferenceHolder<QoreHashNode> h(new QoreHashNode(autoTypeInfo), xsink);
+
+    char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+    git_oid_tostr(oid_hex, sizeof(oid_hex), git_commit_id(commit));
+    h->setKeyValue("id", new QoreStringNode(oid_hex), xsink);
+
+    const char* msg = git_commit_message(commit);
+    h->setKeyValue("message", new QoreStringNode(msg ? msg : ""), xsink);
+
+    const char* summary = git_commit_summary(commit);
+    h->setKeyValue("summary", new QoreStringNode(summary ? summary : ""), xsink);
+
+    const git_signature* author = git_commit_author(commit);
+    if (author) {
+        h->setKeyValue("author_name", new QoreStringNode(author->name ? author->name : ""), xsink);
+        h->setKeyValue("author_email", new QoreStringNode(author->email ? author->email : ""), xsink);
+        h->setKeyValue("author_when", DateTimeNode::makeAbsolute(
+            currentTZ(), (int64)author->when.time, 0), xsink);
+    }
+
+    return h.release();
+}
+
+QoreHashNode* QoreGitRepository::buildConflictHash(const MergeConflictInfo& info,
+                                                    git_commit* our_commit,
+                                                    git_commit* their_commit,
+                                                    ExceptionSink* xsink) {
+    ReferenceHolder<QoreHashNode> h(new QoreHashNode(autoTypeInfo), xsink);
+
+    h->setKeyValue("path", new QoreStringNode(info.path), xsink);
+
+    // Ancestor content
+    SimpleRefHolder<BinaryNode> ancestor_bin(lookupBlobContent(&info.ancestor_oid,
+                                                                info.has_ancestor, xsink));
+    if (*xsink) {
+        return nullptr;
+    }
+    if (ancestor_bin) {
+        h->setKeyValue("ancestor_content_string",
+            new QoreStringNode((const char*)ancestor_bin->getPtr(), ancestor_bin->size(),
+                               QCS_UTF8), xsink);
+        h->setKeyValue("ancestor_content", ancestor_bin.release(), xsink);
+    }
+
+    // Ours content
+    SimpleRefHolder<BinaryNode> ours_bin(lookupBlobContent(&info.ours_oid,
+                                                            info.has_ours, xsink));
+    if (*xsink) {
+        return nullptr;
+    }
+    if (ours_bin) {
+        h->setKeyValue("ours_content_string",
+            new QoreStringNode((const char*)ours_bin->getPtr(), ours_bin->size(),
+                               QCS_UTF8), xsink);
+        h->setKeyValue("ours_content", ours_bin.release(), xsink);
+    }
+
+    // Theirs content
+    SimpleRefHolder<BinaryNode> theirs_bin(lookupBlobContent(&info.theirs_oid,
+                                                              info.has_theirs, xsink));
+    if (*xsink) {
+        return nullptr;
+    }
+    if (theirs_bin) {
+        h->setKeyValue("theirs_content_string",
+            new QoreStringNode((const char*)theirs_bin->getPtr(), theirs_bin->size(),
+                               QCS_UTF8), xsink);
+        h->setKeyValue("theirs_content", theirs_bin.release(), xsink);
+    }
+
+    // Commit info
+    ReferenceHolder<QoreHashNode> ours_ci(buildCommitInfoHash(our_commit, xsink), xsink);
+    if (*xsink) {
+        return nullptr;
+    }
+    h->setKeyValue("ours_commit", ours_ci.release(), xsink);
+
+    ReferenceHolder<QoreHashNode> theirs_ci(buildCommitInfoHash(their_commit, xsink), xsink);
+    if (*xsink) {
+        return nullptr;
+    }
+    h->setKeyValue("theirs_commit", theirs_ci.release(), xsink);
+
+    return h.release();
+}
+
+int QoreGitRepository::applyResolvedContent(const char* path, const void* data, size_t len,
+                                              git_index* merge_index, ExceptionSink* xsink) {
+    // Create a blob from the resolved content
+    git_oid blob_oid;
+    int rc = git_blob_create_from_buffer(&blob_oid, m_repo, data, len);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+            "failed to create blob from resolved content");
+    }
+
+    // Remove conflict entries for this path
+    git_index_conflict_remove(merge_index, path);
+
+    // Add a normal (stage 0) index entry for the resolved file
+    git_index_entry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.mode = GIT_FILEMODE_BLOB;
+    entry.id = blob_oid;
+    entry.path = path;
+
+    rc = git_index_add(merge_index, &entry);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+            "failed to add resolved entry to merge index");
+    }
+
+    return 0;
+}
+
+int QoreGitRepository::populateVirtualTreeFromIndex(git_index* index, ExceptionSink* xsink) {
+    m_virtual_tree.clear();
+    size_t count = git_index_entrycount(index);
+    for (size_t i = 0; i < count; i++) {
+        if ((i % 100) == 0 && qore_check_cancel(xsink, "git merge")) {
+            return -1;
+        }
+        const git_index_entry* entry = git_index_get_byindex(index, i);
+        if (!entry || GIT_INDEX_ENTRY_STAGE(entry) != 0) {
+            continue;  // skip conflict entries
+        }
+        git_oid_cpy(&m_virtual_tree[entry->path], &entry->id);
+    }
+    return 0;
+}
+
+QoreStringNode* QoreGitRepository::createMergeCommit(const char* message,
+                                                      git_commit* our_commit,
+                                                      git_commit* their_commit,
+                                                      git_index* merge_index,
+                                                      ExceptionSink* xsink) {
+    // Write the merge index tree to the repo's ODB
+    git_oid tree_oid;
+    int rc = git_index_write_tree_to(&tree_oid, merge_index, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "failed to write merge tree");
+        return nullptr;
+    }
+
+    git_tree* tree = nullptr;
+    rc = git_tree_lookup(&tree, m_repo, &tree_oid);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "failed to look up merge tree");
+        return nullptr;
+    }
+
+    // Create signature
+    git_signature* sig = nullptr;
+    rc = git_signature_now(&sig, "Virtual User", "virtual@example.com");
+    if (rc < 0) {
+        git_tree_free(tree);
+        git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "failed to create signature");
+        return nullptr;
+    }
+
+    // Check for config-based signature override
+    git_config* config = nullptr;
+    if (git_repository_config(&config, m_repo) == 0) {
+        git_config_entry* name_entry = nullptr;
+        git_config_entry* email_entry = nullptr;
+        if (git_config_get_entry(&name_entry, config, "user.name") == 0 &&
+            git_config_get_entry(&email_entry, config, "user.email") == 0) {
+            git_signature* new_sig = nullptr;
+            if (git_signature_now(&new_sig, name_entry->value, email_entry->value) == 0) {
+                git_signature_free(sig);
+                sig = new_sig;
+            }
+            git_config_entry_free(email_entry);
+        }
+        if (name_entry) {
+            git_config_entry_free(name_entry);
+        }
+        git_config_free(config);
+    }
+
+    // Determine which ref to update
+    std::string update_ref;
+    git_reference* head_test = nullptr;
+    rc = git_reference_lookup(&head_test, m_repo, "HEAD");
+    if (rc == 0 && git_reference_type(head_test) == GIT_REFERENCE_SYMBOLIC) {
+        update_ref = git_reference_symbolic_target(head_test);
+    } else {
+        update_ref = "HEAD";
+    }
+    if (head_test) {
+        git_reference_free(head_test);
+    }
+
+    // Create merge commit with two parents
+    git_oid commit_oid;
+    const git_commit* parents[] = {our_commit, their_commit};
+    rc = git_commit_create(
+        &commit_oid, m_repo, update_ref.c_str(),
+        sig, sig, nullptr, message, tree,
+        2, parents
+    );
+
+    git_signature_free(sig);
+    git_tree_free(tree);
+
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "failed to create merge commit");
+        return nullptr;
+    }
+
+    // Update virtual tree from the merge result
+    if (m_virtual) {
+        if (populateVirtualTreeFromIndex(merge_index, xsink) < 0) {
+            return nullptr;
+        }
+    }
+
+    char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+    git_oid_tostr(oid_hex, sizeof(oid_hex), &commit_oid);
+    return new QoreStringNode(oid_hex);
+}
+
+// --- Merge & Pull Operations ---
+
+QoreHashNode* QoreGitRepository::merge(const char* ref, const QoreHashNode* opts,
+                                        ExceptionSink* xsink) {
+    // Parse options
+    std::string strategy = "detect";
+    const ResolvedCallReferenceNode* resolver = nullptr;
+    std::string merge_message;
+    bool no_commit = false;
+
+    if (opts) {
+        QoreValue v = opts->getKeyValue("strategy");
+        if (v.getType() == NT_STRING) {
+            strategy = v.get<const QoreStringNode>()->c_str();
+        }
+        v = opts->getKeyValue("resolver");
+        if (v.getType() == NT_RUNTIME_CLOSURE || v.getType() == NT_FUNCREF) {
+            resolver = v.get<const ResolvedCallReferenceNode>();
+        }
+        v = opts->getKeyValue("message");
+        if (v.getType() == NT_STRING) {
+            merge_message = v.get<const QoreStringNode>()->c_str();
+        }
+        v = opts->getKeyValue("no_commit");
+        if (v.getType() == NT_BOOLEAN) {
+            no_commit = v.getAsBool();
+        }
+    }
+
+    // Validate strategy
+    if (strategy != "detect" && strategy != "ours" && strategy != "theirs"
+        && strategy != "callback") {
+        xsink->raiseException("GIT-MERGE-OPTION-ERROR",
+            "invalid merge strategy %s; use \"detect\", \"ours\", \"theirs\", or \"callback\"",
+            strategy.c_str());
+        return nullptr;
+    }
+
+    if (strategy == "callback" && !resolver) {
+        xsink->raiseException("GIT-MERGE-OPTION-ERROR",
+            "\"callback\" strategy requires a \"resolver\" code callback");
+        return nullptr;
+    }
+
+    // Default merge message
+    if (merge_message.empty()) {
+        merge_message = std::string("Merge ") + ref;
+    }
+
+    // Ref the callback to prevent GC during lock release
+    ResolvedCallReferenceNode* resolver_ref = nullptr;
+    if (resolver) {
+        resolver_ref = const_cast<ResolvedCallReferenceNode*>(resolver);
+        resolver_ref->ref();
+    }
+
+    // RAII guard to deref resolver on all exit paths
+    struct ResolverGuard {
+        ResolvedCallReferenceNode* r;
+        ExceptionSink* xs;
+        ResolverGuard(ResolvedCallReferenceNode* r, ExceptionSink* xs) : r(r), xs(xs) {}
+        ~ResolverGuard() { if (r) { r->deref(xs); } }
+    } resolver_guard(resolver_ref, xsink);
+
+    git_index* merge_index = nullptr;
+    git_commit* our_commit = nullptr;
+    git_commit* their_commit = nullptr;
+
+    // RAII guards for git objects
+    struct GitCleanup {
+        git_index* idx;
+        git_commit* ours;
+        git_commit* theirs;
+        ~GitCleanup() {
+            if (idx) { git_index_free(idx); }
+            if (ours) { git_commit_free(ours); }
+            if (theirs) { git_commit_free(theirs); }
+        }
+    } git_cleanup{nullptr, nullptr, nullptr};
+
+    std::vector<MergeConflictInfo> conflict_infos;
+    // Conflict hashes built under lock for callback strategy
+    std::vector<QoreHashNode*> conflict_hashes;
+    // Result lists for ours/theirs/detect strategies
+    ReferenceHolder<QoreListNode> resolved_paths_list(new QoreListNode(stringTypeInfo), xsink);
+    bool needs_callback = false;
+
+    // ========== PHASE 1: Analysis + conflict collection (under lock) ==========
+    {
+        AutoLocker al(m_lock);
+        if (!checkRepo(xsink)) {
+            return nullptr;
+        }
+
+        // Resolve ref → their_commit
+        git_object* target = nullptr;
+        int rc = git_revparse_single(&target, m_repo, ref);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                "failed to resolve merge reference");
+            return nullptr;
+        }
+
+        rc = git_commit_lookup(&their_commit, m_repo, git_object_id(target));
+        git_object_free(target);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                "failed to look up their commit");
+            return nullptr;
+        }
+        git_cleanup.theirs = their_commit;
+
+        // Get HEAD → our_commit
+        git_reference* head_ref = nullptr;
+        rc = git_repository_head(&head_ref, m_repo);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                "failed to get HEAD; repository may be empty");
+            return nullptr;
+        }
+        rc = git_commit_lookup(&our_commit, m_repo, git_reference_target(head_ref));
+        git_reference_free(head_ref);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                "failed to look up our HEAD commit");
+            return nullptr;
+        }
+        git_cleanup.ours = our_commit;
+
+        // Merge analysis
+        git_annotated_commit* their_ann = nullptr;
+        rc = git_annotated_commit_lookup(&their_ann, m_repo, git_commit_id(their_commit));
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                "failed to create annotated commit");
+            return nullptr;
+        }
+
+        git_merge_analysis_t analysis;
+        git_merge_preference_t pref;
+        const git_annotated_commit* their_heads[] = {their_ann};
+        rc = git_merge_analysis(&analysis, &pref, m_repo, their_heads, 1);
+        git_annotated_commit_free(their_ann);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "merge analysis failed");
+            return nullptr;
+        }
+
+        // UP_TO_DATE
+        if (analysis & GIT_MERGE_ANALYSIS_UP_TO_DATE) {
+            ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+            result->setKeyValue("up_to_date", true, xsink);
+            result->setKeyValue("fast_forward", false, xsink);
+            result->setKeyValue("conflicts", false, xsink);
+            result->setKeyValue("conflict_list", new QoreListNode(autoHashTypeInfo), xsink);
+            result->setKeyValue("resolved_paths", new QoreListNode(stringTypeInfo), xsink);
+            return result.release();
+        }
+
+        // FAST-FORWARD
+        if (analysis & GIT_MERGE_ANALYSIS_FASTFORWARD) {
+            if (m_virtual) {
+                git_tree* tree = nullptr;
+                rc = git_commit_tree(&tree, their_commit);
+                if (rc < 0) {
+                    git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                        "failed to get commit tree for fast-forward");
+                    return nullptr;
+                }
+                m_virtual_tree.clear();
+                rc = populateVirtualTreeFromGitTree(tree, "", xsink);
+                git_tree_free(tree);
+                if (rc < 0) {
+                    return nullptr;
+                }
+            } else {
+                git_checkout_options co_opts;
+                git_checkout_options_init(&co_opts, GIT_CHECKOUT_OPTIONS_VERSION);
+                co_opts.checkout_strategy = GIT_CHECKOUT_SAFE;
+                rc = git_checkout_tree(m_repo, (git_object*)their_commit, &co_opts);
+                if (rc < 0) {
+                    git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                        "failed to checkout tree for fast-forward");
+                    return nullptr;
+                }
+            }
+
+            // Update HEAD to point to their commit
+            git_reference* head_ref2 = nullptr;
+            rc = git_repository_head(&head_ref2, m_repo);
+            if (rc == 0) {
+                // HEAD exists — update the ref it points to
+                git_reference* new_ref = nullptr;
+                rc = git_reference_set_target(&new_ref, head_ref2,
+                    git_commit_id(their_commit), "fast-forward merge");
+                git_reference_free(head_ref2);
+                if (new_ref) {
+                    git_reference_free(new_ref);
+                }
+                if (rc < 0) {
+                    git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                        "failed to update HEAD for fast-forward");
+                    return nullptr;
+                }
+            } else {
+                // Detached or unborn — set detached HEAD
+                git_repository_set_head_detached(m_repo, git_commit_id(their_commit));
+            }
+
+            char oid_hex[GIT_OID_SHA1_HEXSIZE + 1];
+            git_oid_tostr(oid_hex, sizeof(oid_hex), git_commit_id(their_commit));
+
+            ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+            result->setKeyValue("up_to_date", false, xsink);
+            result->setKeyValue("fast_forward", true, xsink);
+            result->setKeyValue("conflicts", false, xsink);
+            result->setKeyValue("commit_id", new QoreStringNode(oid_hex), xsink);
+            result->setKeyValue("conflict_list", new QoreListNode(autoHashTypeInfo), xsink);
+            result->setKeyValue("resolved_paths", new QoreListNode(stringTypeInfo), xsink);
+            return result.release();
+        }
+
+        // NORMAL MERGE
+        git_merge_options merge_opts;
+        git_merge_options_init(&merge_opts, GIT_MERGE_OPTIONS_VERSION);
+        if (strategy == "ours") {
+            merge_opts.file_favor = GIT_MERGE_FILE_FAVOR_OURS;
+        } else if (strategy == "theirs") {
+            merge_opts.file_favor = GIT_MERGE_FILE_FAVOR_THEIRS;
+        }
+
+        rc = git_merge_commits(&merge_index, m_repo, our_commit, their_commit, &merge_opts);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc, "merge failed");
+            return nullptr;
+        }
+        git_cleanup.idx = merge_index;
+
+        // Clean merge — no conflicts
+        if (!git_index_has_conflicts(merge_index)) {
+            if (!no_commit) {
+                SimpleRefHolder<QoreStringNode> commit_id(
+                    createMergeCommit(merge_message.c_str(), our_commit, their_commit,
+                                      merge_index, xsink));
+                if (*xsink) {
+                    return nullptr;
+                }
+
+                ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+                result->setKeyValue("up_to_date", false, xsink);
+                result->setKeyValue("fast_forward", false, xsink);
+                result->setKeyValue("conflicts", false, xsink);
+                result->setKeyValue("commit_id", commit_id.release(), xsink);
+                result->setKeyValue("conflict_list",
+                    new QoreListNode(autoHashTypeInfo), xsink);
+                result->setKeyValue("resolved_paths",
+                    new QoreListNode(stringTypeInfo), xsink);
+                return result.release();
+            }
+
+            ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+            result->setKeyValue("up_to_date", false, xsink);
+            result->setKeyValue("fast_forward", false, xsink);
+            result->setKeyValue("conflicts", false, xsink);
+            result->setKeyValue("conflict_list", new QoreListNode(autoHashTypeInfo), xsink);
+            result->setKeyValue("resolved_paths", new QoreListNode(stringTypeInfo), xsink);
+            return result.release();
+        }
+
+        // Collect conflicts
+        git_index_conflict_iterator* iter = nullptr;
+        rc = git_index_conflict_iterator_new(&iter, merge_index);
+        if (rc < 0) {
+            git_raise_exception(xsink, "GIT-MERGE-ERROR", rc,
+                "failed to create conflict iterator");
+            return nullptr;
+        }
+
+        const git_index_entry* ancestor_entry = nullptr;
+        const git_index_entry* ours_entry = nullptr;
+        const git_index_entry* theirs_entry = nullptr;
+        int count = 0;
+
+        while (git_index_conflict_next(&ancestor_entry, &ours_entry, &theirs_entry,
+                                        iter) == 0) {
+            if ((++count % 100) == 0 && qore_check_cancel(xsink, "git merge")) {
+                git_index_conflict_iterator_free(iter);
+                return nullptr;
+            }
+
+            MergeConflictInfo info;
+            // Determine path from whichever entry exists
+            if (ancestor_entry) {
+                info.path = ancestor_entry->path;
+            } else if (ours_entry) {
+                info.path = ours_entry->path;
+            } else if (theirs_entry) {
+                info.path = theirs_entry->path;
+            }
+
+            if (ancestor_entry) {
+                git_oid_cpy(&info.ancestor_oid, &ancestor_entry->id);
+                info.has_ancestor = true;
+            }
+            if (ours_entry) {
+                git_oid_cpy(&info.ours_oid, &ours_entry->id);
+                info.has_ours = true;
+            }
+            if (theirs_entry) {
+                git_oid_cpy(&info.theirs_oid, &theirs_entry->id);
+                info.has_theirs = true;
+            }
+
+            conflict_infos.push_back(std::move(info));
+        }
+        git_index_conflict_iterator_free(iter);
+
+        // Strategy: ours/theirs — resolve residual conflicts
+        if (strategy == "ours" || strategy == "theirs") {
+            int resolve_count = 0;
+            for (auto& ci : conflict_infos) {
+                if ((++resolve_count % 10) == 0
+                    && qore_check_cancel(xsink, "git merge resolve")) {
+                    return nullptr;
+                }
+                bool use_ours = (strategy == "ours");
+                bool has_content = use_ours ? ci.has_ours : ci.has_theirs;
+                const git_oid* content_oid = use_ours ? &ci.ours_oid : &ci.theirs_oid;
+
+                if (has_content) {
+                    SimpleRefHolder<BinaryNode> blob(
+                        lookupBlobContent(content_oid, true, xsink));
+                    if (*xsink) {
+                        return nullptr;
+                    }
+                    if (blob) {
+                        if (applyResolvedContent(ci.path.c_str(), blob->getPtr(),
+                                                  blob->size(), merge_index, xsink) < 0) {
+                            return nullptr;
+                        }
+                    }
+                } else {
+                    // Deleted on the chosen side — just remove the conflict
+                    git_index_conflict_remove(merge_index, ci.path.c_str());
+                }
+                resolved_paths_list->push(new QoreStringNode(ci.path), xsink);
+            }
+
+            if (!no_commit) {
+                SimpleRefHolder<QoreStringNode> commit_id(
+                    createMergeCommit(merge_message.c_str(), our_commit, their_commit,
+                                      merge_index, xsink));
+                if (*xsink) {
+                    return nullptr;
+                }
+                ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+                result->setKeyValue("up_to_date", false, xsink);
+                result->setKeyValue("fast_forward", false, xsink);
+                result->setKeyValue("conflicts", true, xsink);
+                result->setKeyValue("commit_id", commit_id.release(), xsink);
+                result->setKeyValue("conflict_list",
+                    new QoreListNode(autoHashTypeInfo), xsink);
+                result->setKeyValue("resolved_paths", resolved_paths_list.release(), xsink);
+                return result.release();
+            }
+
+            ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+            result->setKeyValue("up_to_date", false, xsink);
+            result->setKeyValue("fast_forward", false, xsink);
+            result->setKeyValue("conflicts", true, xsink);
+            result->setKeyValue("conflict_list", new QoreListNode(autoHashTypeInfo), xsink);
+            result->setKeyValue("resolved_paths", resolved_paths_list.release(), xsink);
+            return result.release();
+        }
+
+        // Strategy: detect — return conflicts without resolving
+        if (strategy == "detect") {
+            ReferenceHolder<QoreListNode> conflict_list(
+                new QoreListNode(autoHashTypeInfo), xsink);
+            int detect_count = 0;
+            for (auto& ci : conflict_infos) {
+                if ((++detect_count % 10) == 0
+                    && qore_check_cancel(xsink, "git merge detect")) {
+                    return nullptr;
+                }
+                QoreHashNode* ch = buildConflictHash(ci, our_commit, their_commit, xsink);
+                if (*xsink) {
+                    return nullptr;
+                }
+                conflict_list->push(ch, xsink);
+            }
+
+            ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+            result->setKeyValue("up_to_date", false, xsink);
+            result->setKeyValue("fast_forward", false, xsink);
+            result->setKeyValue("conflicts", true, xsink);
+            result->setKeyValue("conflict_list", conflict_list.release(), xsink);
+            result->setKeyValue("resolved_paths", new QoreListNode(stringTypeInfo), xsink);
+            return result.release();
+        }
+
+        // Strategy: callback — build conflict hashes under lock, release for callbacks
+        assert(strategy == "callback");
+        int cb_build_count = 0;
+        for (auto& ci : conflict_infos) {
+            if ((++cb_build_count % 10) == 0
+                && qore_check_cancel(xsink, "git merge callback build")) {
+                for (auto* h : conflict_hashes) {
+                    h->deref(xsink);
+                }
+                return nullptr;
+            }
+            QoreHashNode* ch = buildConflictHash(ci, our_commit, their_commit, xsink);
+            if (*xsink) {
+                // Clean up already-built hashes
+                for (auto* h : conflict_hashes) {
+                    h->deref(xsink);
+                }
+                return nullptr;
+            }
+            conflict_hashes.push_back(ch);
+        }
+        needs_callback = true;
+        // Keep merge_index, our_commit, their_commit alive — don't let git_cleanup free them
+        git_cleanup.idx = nullptr;
+        git_cleanup.ours = nullptr;
+        git_cleanup.theirs = nullptr;
+    }
+    // ========== LOCK RELEASED ==========
+
+    if (!needs_callback) {
+        // Should not reach here
+        return nullptr;
+    }
+
+    // ========== PHASE 2: Callback invocation (NO LOCK held) ==========
+    // Restore git_cleanup ownership for the callback/phase3 scope
+    git_cleanup.idx = merge_index;
+    git_cleanup.ours = our_commit;
+    git_cleanup.theirs = their_commit;
+
+    std::map<std::string, SimpleRefHolder<BinaryNode>> resolutions;
+    ReferenceHolder<QoreListNode> unresolved_list(new QoreListNode(autoHashTypeInfo), xsink);
+
+    for (size_t i = 0; i < conflict_hashes.size(); i++) {
+        // Cancel check before each callback (could be slow AI call)
+        if (qore_check_cancel(xsink, "git merge callback")) {
+            // Clean up remaining conflict hashes
+            for (size_t j = i; j < conflict_hashes.size(); j++) {
+                conflict_hashes[j]->deref(xsink);
+            }
+            return nullptr;
+        }
+
+        // Call resolver(conflict_hash)
+        ReferenceHolder<QoreListNode> args(new QoreListNode(autoTypeInfo), xsink);
+        args->push(conflict_hashes[i]->refSelf(), xsink);
+        ValueHolder rv(resolver_ref->execValue(*args, xsink), xsink);
+
+        if (*xsink) {
+            // Exception in callback — clean up remaining hashes
+            for (size_t j = i; j < conflict_hashes.size(); j++) {
+                conflict_hashes[j]->deref(xsink);
+            }
+            return nullptr;
+        }
+
+        if (rv->getType() == NT_STRING) {
+            const QoreStringNode* str = rv->get<const QoreStringNode>();
+            void* copy = malloc(str->size());
+            if (!copy) {
+                for (size_t j = i + 1; j < conflict_hashes.size(); j++) {
+                    conflict_hashes[j]->deref(xsink);
+                }
+                xsink->raiseException("GIT-MERGE-ERROR",
+                    "failed to allocate %zu bytes for resolved content", str->size());
+                return nullptr;
+            }
+            memcpy(copy, str->c_str(), str->size());
+            BinaryNode* bin = new BinaryNode(copy, str->size());
+            resolutions.emplace(conflict_infos[i].path, bin);
+        } else if (rv->getType() == NT_BINARY) {
+            BinaryNode* bin = rv.release().get<BinaryNode>();
+            resolutions.emplace(conflict_infos[i].path, bin);
+        } else {
+            // Unresolved — keep the conflict hash
+            unresolved_list->push(conflict_hashes[i]->refSelf(), xsink);
+        }
+
+        // Deref the conflict hash (we refSelf'd for args and possibly for unresolved)
+        conflict_hashes[i]->deref(xsink);
+    }
+    conflict_hashes.clear();
+
+    // ========== PHASE 3: Apply resolutions (under lock) ==========
+    {
+        AutoLocker al(m_lock);
+        if (!checkRepo(xsink)) {
+            return nullptr;
+        }
+
+        for (auto& kv : resolutions) {
+            if (applyResolvedContent(kv.first.c_str(), kv.second->getPtr(),
+                                      kv.second->size(), merge_index, xsink) < 0) {
+                return nullptr;
+            }
+            resolved_paths_list->push(new QoreStringNode(kv.first), xsink);
+        }
+
+        QoreStringNode* commit_id = nullptr;
+        if (unresolved_list->empty() && !no_commit) {
+            commit_id = createMergeCommit(merge_message.c_str(), our_commit, their_commit,
+                                           merge_index, xsink);
+            if (*xsink) {
+                return nullptr;
+            }
+        }
+
+        ReferenceHolder<QoreHashNode> result(new QoreHashNode(autoTypeInfo), xsink);
+        result->setKeyValue("up_to_date", false, xsink);
+        result->setKeyValue("fast_forward", false, xsink);
+        result->setKeyValue("conflicts", true, xsink);
+        result->setKeyValue("commit_id", commit_id, xsink);
+        result->setKeyValue("conflict_list", unresolved_list.release(), xsink);
+        result->setKeyValue("resolved_paths", resolved_paths_list.release(), xsink);
+        return result.release();
+    }
+}
+
+QoreHashNode* QoreGitRepository::pull(const char* remote_name, const QoreHashNode* opts,
+                                       ExceptionSink* xsink) {
+    // Step 1: Fetch (releases lock internally for network I/O)
+    if (fetch(remote_name, xsink) < 0) {
+        return nullptr;
+    }
+
+    // Step 2: Determine tracking ref
+    std::string tracking_ref;
+    {
+        AutoLocker al(m_lock);
+        if (!checkRepo(xsink)) {
+            return nullptr;
+        }
+
+        const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
+
+        // Get current branch name
+        git_reference* head_ref = nullptr;
+        int rc = git_repository_head(&head_ref, m_repo);
+        if (rc < 0) {
+            xsink->raiseException("GIT-PULL-ERROR",
+                "cannot pull: HEAD is unborn or detached");
+            return nullptr;
+        }
+
+        const char* head_name = git_reference_name(head_ref);
+        // Extract branch name from refs/heads/<branch>
+        std::string branch;
+        const char* prefix = "refs/heads/";
+        if (head_name && strncmp(head_name, prefix, strlen(prefix)) == 0) {
+            branch = head_name + strlen(prefix);
+        }
+        git_reference_free(head_ref);
+
+        if (branch.empty()) {
+            xsink->raiseException("GIT-PULL-ERROR",
+                "cannot pull with detached HEAD");
+            return nullptr;
+        }
+
+        // The tracking ref is refs/remotes/<remote>/<branch>
+        tracking_ref = std::string("refs/remotes/") + rname + "/" + branch;
+
+        // Verify it exists; fall back to FETCH_HEAD
+        git_reference* ref = nullptr;
+        if (git_reference_lookup(&ref, m_repo, tracking_ref.c_str()) != 0) {
+            tracking_ref = "FETCH_HEAD";
+        } else {
+            git_reference_free(ref);
+        }
+    }
+
+    // Step 3: Merge (manages its own locking)
+    return merge(tracking_ref.c_str(), opts, xsink);
+}

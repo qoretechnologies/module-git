@@ -39,6 +39,9 @@ module GitConfigManager {
 public namespace GitConfigManager {
     #! Event fired when config files change during sync
     public const EVENT_CONFIG_CHANGED = "config-changed";
+
+    #! Event fired when unresolved merge conflicts are detected
+    public const EVENT_CONFIG_CONFLICT = "config-conflict";
 }
 
 /** @mainpage GitConfigManager Module

@@ -1,0 +1,427 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitMerge.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires QUnit
+
+%exec-class GitMergeTest
+
+public class GitMergeTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitMergeTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-merge-test-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+
+        addTestCase("virtual: fast-forward merge", \testFastForward());
+        addTestCase("virtual: up-to-date merge", \testUpToDate());
+        addTestCase("virtual: clean normal merge", \testCleanMerge());
+        addTestCase("virtual: conflict detect", \testConflictDetect());
+        addTestCase("virtual: strategy ours", \testStrategyOurs());
+        addTestCase("virtual: strategy theirs", \testStrategyTheirs());
+        addTestCase("virtual: callback resolves all", \testCallbackResolvesAll());
+        addTestCase("virtual: callback returns NOTHING", \testCallbackReturnsNothing());
+        addTestCase("virtual: callback throws", \testCallbackThrows());
+        addTestCase("virtual: mixed resolution", \testMixedResolution());
+        addTestCase("virtual: add/add conflict", \testAddAddConflict());
+        addTestCase("virtual: no_commit option", \testNoCommit());
+        addTestCase("negative: invalid strategy", \testInvalidStrategy());
+        addTestCase("negative: callback without resolver", \testCallbackWithoutResolver());
+        addTestCase("pull: from local bare remote", \testPullFromRemote());
+
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    #! Creates a virtual repo with identity configured
+    private Git::GitRepository createVirtualRepo() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "MergeBot");
+        repo.configSet("user.email", "merge@test.com");
+        return repo;
+    }
+
+    #! Sets up a divergent history: main has file_a, branch has file_b (no overlap)
+    /** Returns the repo on the "main" branch with a branch called "feature" diverging.
+    */
+    private Git::GitRepository setupCleanDivergence() {
+        Git::GitRepository repo = createVirtualRepo();
+
+        # Initial commit on main
+        repo.writeFileString("base.txt", "base content\n");
+        repo.commit("Initial commit");
+
+        # Create feature branch from main
+        repo.createBranch("feature");
+
+        # Add a file on main
+        repo.writeFileString("main_file.txt", "main content\n");
+        repo.commit("Add main file");
+
+        # Switch to feature and add a different file
+        repo.checkout("feature");
+        repo.writeFileString("feature_file.txt", "feature content\n");
+        repo.commit("Add feature file");
+
+        # Switch back to main for the merge
+        repo.checkout("main");
+
+        return repo;
+    }
+
+    #! Sets up a conflicting history: both branches modify the same file
+    private Git::GitRepository setupConflict() {
+        Git::GitRepository repo = createVirtualRepo();
+
+        # Initial commit with a shared file
+        repo.writeFileString("shared.txt", "original content\n");
+        repo.commit("Initial commit");
+
+        # Create feature branch
+        repo.createBranch("feature");
+
+        # Modify file on main
+        repo.writeFileString("shared.txt", "main version\n");
+        repo.commit("Modify on main");
+
+        # Switch to feature and modify the same file differently
+        repo.checkout("feature");
+        repo.writeFileString("shared.txt", "feature version\n");
+        repo.commit("Modify on feature");
+
+        # Switch back to main for the merge
+        repo.checkout("main");
+
+        return repo;
+    }
+
+    private testFastForward() {
+        Git::GitRepository repo = createVirtualRepo();
+
+        repo.writeFileString("base.txt", "base\n");
+        repo.commit("Initial");
+
+        # Create branch and add a commit
+        repo.createBranch("feature");
+        repo.checkout("feature");
+        repo.writeFileString("new.txt", "new content\n");
+        repo.commit("Add new file");
+
+        # Go back to main (behind feature)
+        repo.checkout("main");
+        assertFalse(repo.fileExists("new.txt"), "new.txt not on main yet");
+
+        # Merge feature into main — should fast-forward
+        hash<auto> result = repo.merge("feature");
+        assertTrue(result.fast_forward, "fast-forward merge");
+        assertFalse(result.conflicts, "no conflicts");
+        assertTrue(result.commit_id.val(), "commit_id set");
+        assertTrue(repo.fileExists("new.txt"), "new.txt visible after merge");
+    }
+
+    private testUpToDate() {
+        Git::GitRepository repo = createVirtualRepo();
+
+        repo.writeFileString("base.txt", "base\n");
+        repo.commit("Initial");
+
+        # Merge main into itself — already up to date
+        hash<auto> result = repo.merge("main");
+        assertTrue(result.up_to_date, "already up to date");
+        assertFalse(result.conflicts, "no conflicts");
+    }
+
+    private testCleanMerge() {
+        Git::GitRepository repo = setupCleanDivergence();
+
+        hash<auto> result = repo.merge("feature");
+        assertFalse(result.up_to_date, "not up to date");
+        assertFalse(result.fast_forward, "not fast-forward");
+        assertFalse(result.conflicts, "no conflicts");
+        assertTrue(result.commit_id.val(), "merge commit created");
+
+        # Both files should be visible
+        assertTrue(repo.fileExists("main_file.txt"), "main file exists");
+        assertTrue(repo.fileExists("feature_file.txt"), "feature file exists after merge");
+
+        # Verify merge commit has 2 parents
+        list<hash<auto>> hist = repo.log(1);
+        assertEq(2, hist[0].parent_count, "merge commit has 2 parents");
+    }
+
+    private testConflictDetect() {
+        Git::GitRepository repo = setupConflict();
+
+        hash<auto> result = repo.merge("feature", {"strategy": "detect"});
+        assertTrue(result.conflicts, "conflicts detected");
+        assertFalse(result.commit_id.val(), "no commit created");
+        assertEq(1, result.conflict_list.size(), "1 conflict");
+
+        hash<auto> conflict = result.conflict_list[0];
+        assertEq("shared.txt", conflict.path, "conflict path correct");
+        assertEq("main version\n", conflict.ours_content_string, "ours content");
+        assertEq("feature version\n", conflict.theirs_content_string, "theirs content");
+        assertEq("original content\n", conflict.ancestor_content_string, "ancestor content");
+        assertTrue(conflict.ours_commit.id.val(), "ours commit info present");
+        assertTrue(conflict.theirs_commit.id.val(), "theirs commit info present");
+    }
+
+    private testStrategyOurs() {
+        Git::GitRepository repo = setupConflict();
+
+        hash<auto> result = repo.merge("feature", {"strategy": "ours"});
+        assertFalse(result.conflicts, "ours strategy resolves at merge level");
+        assertTrue(result.commit_id.val(), "merge commit created");
+
+        # File should have "ours" content
+        assertEq("main version\n", repo.readFileString("shared.txt"), "ours content wins");
+    }
+
+    private testStrategyTheirs() {
+        Git::GitRepository repo = setupConflict();
+
+        hash<auto> result = repo.merge("feature", {"strategy": "theirs"});
+        assertFalse(result.conflicts, "theirs strategy resolves at merge level");
+        assertTrue(result.commit_id.val(), "merge commit created");
+
+        # File should have "theirs" content
+        assertEq("feature version\n", repo.readFileString("shared.txt"), "theirs content wins");
+    }
+
+    private testCallbackResolvesAll() {
+        Git::GitRepository repo = setupConflict();
+
+        hash<auto> result = repo.merge("feature", {
+            "strategy": "callback",
+            "resolver": auto sub (hash<auto> conflict) {
+                return "resolved: " + conflict.ours_content_string + conflict.theirs_content_string;
+            },
+        });
+
+        assertTrue(result.conflicts, "conflicts flag set");
+        assertTrue(result.commit_id.val(), "merge commit created");
+        assertEq(0, result.conflict_list.size(), "no unresolved conflicts");
+        assertEq(1, result.resolved_paths.size(), "1 path resolved");
+
+        assertEq("resolved: main version\nfeature version\n",
+            repo.readFileString("shared.txt"), "resolved content correct");
+    }
+
+    private testCallbackReturnsNothing() {
+        Git::GitRepository repo = setupConflict();
+
+        hash<auto> result = repo.merge("feature", {
+            "strategy": "callback",
+            "resolver": auto sub (hash<auto> conflict) {
+                # Return NOTHING — leave unresolved
+            },
+        });
+
+        assertTrue(result.conflicts, "conflicts flag set");
+        assertFalse(result.commit_id.val(), "no commit (unresolved)");
+        assertEq(1, result.conflict_list.size(), "1 unresolved conflict");
+        assertEq(0, result.resolved_paths.size(), "no resolved paths");
+    }
+
+    private testCallbackThrows() {
+        Git::GitRepository repo = setupConflict();
+
+        assertThrows("RESOLVER-ERROR", sub () {
+            repo.merge("feature", {
+                "strategy": "callback",
+                "resolver": auto sub (hash<auto> conflict) {
+                    throw "RESOLVER-ERROR", "AI service unavailable";
+                },
+            });
+        }, NOTHING, "callback exception propagated");
+    }
+
+    private testMixedResolution() {
+        Git::GitRepository repo = createVirtualRepo();
+
+        # Create 3 files on main
+        repo.writeFileString("file1.txt", "original1\n");
+        repo.writeFileString("file2.txt", "original2\n");
+        repo.writeFileString("file3.txt", "original3\n");
+        repo.commit("Initial");
+
+        repo.createBranch("feature");
+
+        # Modify all 3 on main
+        repo.writeFileString("file1.txt", "main1\n");
+        repo.writeFileString("file2.txt", "main2\n");
+        repo.writeFileString("file3.txt", "main3\n");
+        repo.commit("Main changes");
+
+        # Modify all 3 on feature
+        repo.checkout("feature");
+        repo.writeFileString("file1.txt", "feature1\n");
+        repo.writeFileString("file2.txt", "feature2\n");
+        repo.writeFileString("file3.txt", "feature3\n");
+        repo.commit("Feature changes");
+
+        repo.checkout("main");
+
+        int call_count = 0;
+        hash<auto> result = repo.merge("feature", {
+            "strategy": "callback",
+            "resolver": auto sub (hash<auto> conflict) {
+                call_count++;
+                # Resolve file1 and file2, leave file3 unresolved
+                if (conflict.path == "file3.txt") {
+                    return;
+                }
+                return "merged: " + conflict.path + "\n";
+            },
+        });
+
+        assertEq(3, call_count, "callback called 3 times");
+        assertTrue(result.conflicts, "conflicts detected");
+        assertFalse(result.commit_id.val(), "no commit (1 unresolved)");
+        assertEq(1, result.conflict_list.size(), "1 unresolved");
+        assertEq("file3.txt", result.conflict_list[0].path, "file3 unresolved");
+        assertEq(2, result.resolved_paths.size(), "2 resolved");
+    }
+
+    private testAddAddConflict() {
+        Git::GitRepository repo = createVirtualRepo();
+
+        repo.writeFileString("base.txt", "base\n");
+        repo.commit("Initial");
+
+        repo.createBranch("feature");
+
+        # Add same new file on main
+        repo.writeFileString("new.txt", "main new\n");
+        repo.commit("Add new on main");
+
+        # Add same file on feature
+        repo.checkout("feature");
+        repo.writeFileString("new.txt", "feature new\n");
+        repo.commit("Add new on feature");
+
+        repo.checkout("main");
+
+        hash<auto> result = repo.merge("feature", {"strategy": "detect"});
+        assertTrue(result.conflicts, "add/add conflict detected");
+        assertEq(1, result.conflict_list.size(), "1 conflict");
+        assertEq("new.txt", result.conflict_list[0].path, "conflict on new.txt");
+        # Ancestor should be NOTHING for add/add
+        assertNothing(result.conflict_list[0].ancestor_content, "no ancestor for add/add");
+    }
+
+    private testNoCommit() {
+        Git::GitRepository repo = setupCleanDivergence();
+
+        # no_commit prevents commit creation even for clean merges
+        hash<auto> result = repo.merge("feature", {
+            "no_commit": True,
+        });
+
+        assertFalse(result.conflicts, "no conflicts in clean merge");
+        assertFalse(result.commit_id.val(), "no commit (no_commit=True)");
+    }
+
+    private testInvalidStrategy() {
+        Git::GitRepository repo = createVirtualRepo();
+        repo.writeFileString("f.txt", "x\n");
+        repo.commit("init");
+
+        assertThrows("GIT-MERGE-OPTION-ERROR", sub () {
+            repo.merge("main", {"strategy": "invalid"});
+        }, NOTHING, "invalid strategy rejected");
+    }
+
+    private testCallbackWithoutResolver() {
+        Git::GitRepository repo = createVirtualRepo();
+        repo.writeFileString("f.txt", "x\n");
+        repo.commit("init");
+
+        assertThrows("GIT-MERGE-OPTION-ERROR", sub () {
+            repo.merge("main", {"strategy": "callback"});
+        }, NOTHING, "callback without resolver rejected");
+    }
+
+    private testPullFromRemote() {
+        # Create a bare "server" repo
+        string bare_path = m_tmpdir + "/merge-server.git";
+        Git::GitRepository bare = Git::GitRepository::init(bare_path, True);
+
+        # Create and push initial content
+        string setup_path = m_tmpdir + "/merge-setup";
+        Git::GitRepository setup = Git::GitRepository::init(setup_path);
+        setup.configSet("user.name", "Setup");
+        setup.configSet("user.email", "setup@test.com");
+        setup.addRemote("origin", bare_path);
+        {
+            File f();
+            f.open(setup_path + "/config.yaml", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("key: value\n");
+        }
+        setup.add("config.yaml");
+        setup.commit("Initial config");
+        setup.push();
+
+        # Clone into a second disk repo
+        string clone_path = m_tmpdir + "/merge-clone";
+        Git::GitRepository clone = Git::GitRepository::init(clone_path);
+        clone.configSet("user.name", "Clone");
+        clone.configSet("user.email", "clone@test.com");
+        clone.addRemote("origin", bare_path);
+        clone.fetch();
+
+        # Create local main branch from remote tracking branch
+        list<string> remote_branches = clone.branches(True);
+        assertTrue(remote_branches.size() > 0, "remote branches exist");
+        clone.createBranch("main", remote_branches[0]);
+        clone.checkout("main");
+
+        assertEq("key: value\n", clone.readFileString("config.yaml"), "initial content");
+
+        # Push a new commit from setup repo
+        {
+            File f();
+            f.open(setup_path + "/config.yaml", O_CREAT | O_WRONLY | O_TRUNC);
+            f.write("key: updated\n");
+        }
+        setup.add("config.yaml");
+        setup.commit("Update config");
+        setup.push();
+
+        # Pull the new commit into clone
+        hash<auto> result = clone.pull();
+        assertTrue(result.fast_forward, "fast-forward pull");
+        assertEq("key: updated\n", clone.readFileString("config.yaml"),
+            "content updated after pull");
+    }
+}

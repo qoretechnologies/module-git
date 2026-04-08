@@ -105,18 +105,31 @@ public class GitConfigManager {
 
     # --- Sync & Publish ---
 
-    #! Syncs the repository by fetching from the remote
-    /** Fetches from the remote and detects changes since the last known HEAD.
+    #! Syncs the repository by pulling from the remote (fetch + merge)
+    /** Fetches from the remote and merges the tracking branch into the current branch.
 
         @param remote the remote name (default: "origin")
+        @param merge_opts optional merge options for conflict resolution; supports keys:
+        - \c strategy (string): \c "detect" (default), \c "ours", \c "theirs", \c "callback"
+        - \c resolver (code): callback for \c "callback" strategy
+        - \c message (string): merge commit message
         @return a hash with keys:
         - \c changes: @ref True if there were new commits
         - \c old_head: the previous HEAD commit ID
         - \c new_head: the current HEAD commit ID
+        - \c merge_result: the @ref hash<Git::GitMergeResult> from the pull
     */
-    hash<auto> sync(*string remote) {
+    hash<auto> sync(*string remote, *hash<auto> merge_opts) {
         *string old_head = last_head_id;
-        repo.fetch(remote);
+        *hash<Git::GitMergeResult> merge_result;
+
+        # Pull requires a local branch; fall back to fetch if HEAD is unborn or detached
+        if (repo.headCommitId() && repo.currentBranch()) {
+            merge_result = repo.pull(remote, merge_opts);
+        } else {
+            repo.fetch(remote);
+        }
+
         *string new_head = repo.headCommitId();
         bool changed = (old_head != new_head);
         last_head_id = new_head;
@@ -124,6 +137,7 @@ public class GitConfigManager {
             "changes": changed,
             "old_head": old_head,
             "new_head": new_head,
+            "merge_result": merge_result,
         };
     }
 
