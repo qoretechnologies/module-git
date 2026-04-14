@@ -34,6 +34,11 @@
 
 #include <git2.h>
 
+// libgit2 < 1.6 uses GIT_OID_HEXSZ; 1.6+ introduced GIT_OID_SHA1_HEXSIZE
+#ifndef GIT_OID_SHA1_HEXSIZE
+#define GIT_OID_SHA1_HEXSIZE GIT_OID_HEXSZ
+#endif
+
 #include <string>
 
 //! Raises a Qore exception from the last libgit2 error
