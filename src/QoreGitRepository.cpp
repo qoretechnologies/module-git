@@ -1994,7 +1994,8 @@ QoreListNode* QoreGitRepository::blame(const char* path, const QoreHashNode* opt
         QoreValue v = opts->getKeyValue("newest_commit");
         if (v.getType() == NT_STRING) {
             git_object* obj = nullptr;
-            int rc = git_revparse_single(&obj, m_repo, v.get<const QoreStringNode>()->c_str());
+            QoreStringValueHelper str(v);
+            int rc = git_revparse_single(&obj, m_repo, str->c_str());
             if (rc < 0) {
                 git_raise_exception(xsink, "GIT-BLAME-ERROR", rc,
                     "failed to resolve newest_commit");
@@ -2006,7 +2007,8 @@ QoreListNode* QoreGitRepository::blame(const char* path, const QoreHashNode* opt
         v = opts->getKeyValue("oldest_commit");
         if (v.getType() == NT_STRING) {
             git_object* obj = nullptr;
-            int rc = git_revparse_single(&obj, m_repo, v.get<const QoreStringNode>()->c_str());
+            QoreStringValueHelper str(v);
+            int rc = git_revparse_single(&obj, m_repo, str->c_str());
             if (rc < 0) {
                 git_raise_exception(xsink, "GIT-BLAME-ERROR", rc,
                     "failed to resolve oldest_commit");
@@ -2422,7 +2424,8 @@ QoreHashNode* QoreGitRepository::merge(const char* ref, const QoreHashNode* opts
     if (opts) {
         QoreValue v = opts->getKeyValue("strategy");
         if (v.getType() == NT_STRING) {
-            strategy = v.get<const QoreStringNode>()->c_str();
+            QoreStringValueHelper str(v);
+            strategy = str->c_str();
         }
         v = opts->getKeyValue("resolver");
         if (v.getType() == NT_RUNTIME_CLOSURE || v.getType() == NT_FUNCREF) {
@@ -2430,7 +2433,8 @@ QoreHashNode* QoreGitRepository::merge(const char* ref, const QoreHashNode* opts
         }
         v = opts->getKeyValue("message");
         if (v.getType() == NT_STRING) {
-            merge_message = v.get<const QoreStringNode>()->c_str();
+            QoreStringValueHelper str(v);
+            merge_message = str->c_str();
         }
         v = opts->getKeyValue("no_commit");
         if (v.getType() == NT_BOOLEAN) {
@@ -2877,7 +2881,7 @@ QoreHashNode* QoreGitRepository::merge(const char* ref, const QoreHashNode* opts
         }
 
         if (rv->getType() == NT_STRING) {
-            const QoreStringNode* str = rv->get<const QoreStringNode>();
+            QoreStringValueHelper str(*rv);
             void* copy = malloc(str->size());
             if (!copy) {
                 for (size_t j = i + 1; j < conflict_hashes.size(); j++) {

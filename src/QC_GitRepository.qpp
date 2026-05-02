@@ -1064,13 +1064,15 @@ static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) 
             QoreValue name_val = identity->getKeyValue("name");
             QoreValue email_val = identity->getKeyValue("email");
             if (name_val.getType() == NT_STRING) {
-                repo->configSet("user.name", name_val.get<const QoreStringNode>()->c_str(), xsink);
+                QoreStringValueHelper name(name_val);
+                repo->configSet("user.name", name->c_str(), xsink);
                 if (*xsink) {
                     return QoreValue();
                 }
             }
             if (email_val.getType() == NT_STRING) {
-                repo->configSet("user.email", email_val.get<const QoreStringNode>()->c_str(), xsink);
+                QoreStringValueHelper email(email_val);
+                repo->configSet("user.email", email->c_str(), xsink);
                 if (*xsink) {
                     return QoreValue();
                 }
@@ -1091,27 +1093,28 @@ static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) 
     }
 
     // Checkout branch if specified, otherwise auto-detect
-    const char* branch = nullptr;
+    bool has_branch = false;
     if (opts) {
         QoreValue bv = opts->getKeyValue("branch");
         if (bv.getType() == NT_STRING) {
-            branch = bv.get<const QoreStringNode>()->c_str();
+            QoreStringValueHelper branch(bv);
+            repo->checkout(branch->c_str(), xsink);
+            if (*xsink) {
+                return QoreValue();
+            }
+            has_branch = true;
         }
     }
-    if (branch) {
-        repo->checkout(branch, xsink);
-        if (*xsink) {
-            return QoreValue();
-        }
-    } else {
+    if (!has_branch) {
         // Auto-detect: checkout first remote branch
         ReferenceHolder<QoreListNode> branches(repo->listBranches(true, xsink), xsink);
         if (*xsink) {
             return QoreValue();
         }
         if (branches && branches->size() > 0) {
-            const QoreStringNode* first = branches->retrieveEntry(0).get<const QoreStringNode>();
-            if (first) {
+            QoreValue first_val = branches->retrieveEntry(0);
+            if (first_val.getType() == NT_STRING) {
+                QoreStringValueHelper first(first_val);
                 repo->checkout(first->c_str(), xsink);
                 if (*xsink) {
                     return QoreValue();
