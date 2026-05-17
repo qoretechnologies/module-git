@@ -25,7 +25,7 @@
 %modern
 
 %requires git >= 1.0
-%requires GitConfigManager
+%requires ../qlib/GitConfigManager
 %requires QUnit
 
 %exec-class GitConfigManagerTest

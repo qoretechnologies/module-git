@@ -25,7 +25,7 @@
 %modern
 
 %requires git >= 1.0
-%requires GitDataProvider
+%requires ../qlib/GitDataProvider
 %requires QUnit
 
 %exec-class GitDataProviderTest

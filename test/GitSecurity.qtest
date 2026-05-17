@@ -25,9 +25,9 @@
 %modern
 
 %requires git >= 1.0
-%requires GitForgeHelper
-%requires GitConnections
-%requires GitDataProvider
+%requires ../qlib/GitForgeHelper
+%requires ../qlib/GitConnections.qm
+%requires ../qlib/GitDataProvider
 %requires QUnit
 
 %exec-class GitSecurityTest

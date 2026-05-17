@@ -24,7 +24,7 @@
 
 %modern
 
-%requires GitForgeHelper
+%requires ../qlib/GitForgeHelper
 %requires QUnit
 
 %exec-class GitForgeHelperTest
