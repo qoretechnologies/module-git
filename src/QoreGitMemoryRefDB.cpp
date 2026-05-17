@@ -27,7 +27,16 @@
 
 #include "QoreGitMemoryRefDB.h"
 
-#include <git2/errors.h>
+// git_error_set_str is declared in the public <git2/errors.h> (reached via
+// <git2.h>) on libgit2 < 1.6, but was moved to the sys header
+// <git2/sys/errors.h> in libgit2 1.6+.  Include the sys header only when it
+// exists so the module builds against both old (e.g. Debian 12 / 1.5.x) and
+// new (CI / 1.9.x) libgit2 releases.
+#if defined(__has_include)
+#  if __has_include(<git2/sys/errors.h>)
+#    include <git2/sys/errors.h>
+#  endif
+#endif
 
 #include <cstring>
 #include <fnmatch.h>
