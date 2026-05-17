@@ -31,6 +31,17 @@ security and robustness:
   writes use O_NOFOLLOW to defeat working-tree symlink attacks
 - remote URLs reject the "ext::" arbitrary-command transport
 - fetch()/push() hold the repository lock across network I/O
+- when a SandboxManager is active, fetch()/push()/pull()/connectRemote()
+  run a best-effort network pre-flight that resolves the remote host and
+  validates each address against the network security policy (SSRF /
+  private-network / cloud-metadata blocking) before connecting
 - GitForgeHelper validates the GitLab URL before attaching the API token
   and scrubs credential context from REST errors
 - GitConnections rejects ".." in gitlocal:// URLs
+
+GitDataProvider:
+- the log and diff action responses now use typed sub-types
+  (commit/signature/diff-entry) instead of untyped lists, so the UI
+  exposes per-field mapping
+- the diff and log actions preselect their options so the action form
+  is populated

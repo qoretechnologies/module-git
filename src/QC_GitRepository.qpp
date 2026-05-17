@@ -860,6 +860,17 @@ repo.fetch("upstream");      # fetch from named remote
 
     @throw GIT-FETCH-ERROR failed to fetch
     @throw GIT-REPOSITORY-ERROR repository has been closed
+    @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
+    @ref Qore::SandboxManager "SandboxManager" network policy
+
+    @note When a @ref Qore::SandboxManager "SandboxManager" is active, a
+    best-effort pre-flight check resolves the remote host and validates each
+    address against the network security policy (SSRF / private-network /
+    cloud-metadata blocking) before connecting. This is advisory: libgit2
+    performs its own independent resolution and connection, so DNS rebinding
+    between the check and the connect, HTTP redirects, and proxies are not
+    covered. Coarse all-or-nothing control is always enforced via the
+    @c NETWORK functional domain.
 */
 nothing GitRepository::fetch(*string remote) [dom=NETWORK] {
     repo->fetch(remote ? remote->c_str() : nullptr, xsink);
@@ -877,6 +888,11 @@ repo.push("origin", "refs/heads/main:refs/heads/main");  # explicit refspec
 
     @throw GIT-PUSH-ERROR failed to push
     @throw GIT-REPOSITORY-ERROR repository has been closed
+    @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
+    @ref Qore::SandboxManager "SandboxManager" network policy
+
+    @note See @ref GitRepository::fetch() "fetch()" for details on the
+    best-effort network sandbox pre-flight check.
 */
 nothing GitRepository::push(*string remote, *string refspec) [dom=NETWORK] {
     repo->push(remote ? remote->c_str() : nullptr,
@@ -1062,6 +1078,9 @@ GitRepository repo = GitRepository::connectRemote("git@github.com:org/repo.git",
     @throw GIT-REMOTE-ERROR failed to add remote
     @throw GIT-FETCH-ERROR failed to fetch from remote
     @throw GIT-CHECKOUT-ERROR failed to checkout branch
+    @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
+    @ref Qore::SandboxManager "SandboxManager" network policy (see
+    @ref GitRepository::fetch() "fetch()")
 
     @since git 1.0
 */
@@ -1216,6 +1235,9 @@ hash<GitMergeResult> result = repo.pull("origin", {
     @throw GIT-MERGE-ERROR failed to merge
     @throw GIT-PULL-ERROR failed to determine tracking branch or detached HEAD
     @throw GIT-REPOSITORY-ERROR repository has been closed
+    @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
+    @ref Qore::SandboxManager "SandboxManager" network policy (see
+    @ref GitRepository::fetch() "fetch()")
 
     @since git 1.0
 */

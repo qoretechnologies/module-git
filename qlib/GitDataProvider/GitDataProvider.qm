@@ -131,6 +131,7 @@ module GitDataProvider {
                 "and returns a list of changed files with their status",
             "options": DataProviderActionCatalog::getActionOptionFromFields(
                 GitDiffRequestDataType::Fields,
+                {"preselected": True},
             ),
             "output_type": new GitDiffResponseDataType(),
         });
@@ -147,6 +148,7 @@ module GitDataProvider {
                 "by path and limited by count",
             "options": DataProviderActionCatalog::getActionOptionFromFields(
                 GitLogRequestDataType::Fields,
+                {"preselected": True},
             ),
             "output_type": new GitLogResponseDataType(),
         });

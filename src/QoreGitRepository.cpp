@@ -34,6 +34,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <netdb.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 
 //! nftw callback for best-effort recursive directory removal
@@ -108,6 +110,152 @@ static bool validateRemoteUrl(const char* url, ExceptionSink* xsink) {
         return false;
     }
     return true;
+}
+
+//! Parses host and port from a git remote URL
+/** Handles the network transports (https, http, git, ssh, and scp-like
+    `[user@]host:path`). Returns false for local/file:// transports (no network
+    connection is made) or if no host can be extracted.
+
+    @return true if a network host was extracted into @a host / @a port
+*/
+static bool parseRemoteHostPort(const char* url, std::string& host, int& port) {
+    if (!url || !*url) {
+        return false;
+    }
+    std::string u(url);
+    // local path or file:// transport — no network connection
+    if (u[0] == '/' || u[0] == '.' || !u.compare(0, 7, "file://")) {
+        return false;
+    }
+
+    int default_port;
+    std::string rest;
+    size_t scheme_end = u.find("://");
+    if (scheme_end != std::string::npos) {
+        std::string scheme = u.substr(0, scheme_end);
+        rest = u.substr(scheme_end + 3);
+        if (scheme == "https") {
+            default_port = 443;
+        } else if (scheme == "http") {
+            default_port = 80;
+        } else if (scheme == "git") {
+            default_port = 9418;
+        } else if (scheme == "ssh") {
+            default_port = 22;
+        } else {
+            default_port = 0;  // unknown scheme: best-effort, still resolve host
+        }
+    } else {
+        // scp-like syntax: [user@]host:path (ssh transport); ':' separates the
+        // path, not a port
+        rest = u;
+        default_port = 22;
+        size_t at = rest.find('@');
+        if (at != std::string::npos) {
+            rest = rest.substr(at + 1);
+        }
+        size_t colon = rest.find(':');
+        host = (colon == std::string::npos) ? rest : rest.substr(0, colon);
+        port = default_port;
+        return !host.empty();
+    }
+
+    // strip optional userinfo (before the first '@', and before any '/')
+    size_t slash = rest.find('/');
+    size_t at = rest.find('@');
+    if (at != std::string::npos && (slash == std::string::npos || at < slash)) {
+        rest = rest.substr(at + 1);
+    }
+    // host[:port] ends at the first '/'
+    size_t end = rest.find('/');
+    std::string hostport = (end == std::string::npos) ? rest : rest.substr(0, end);
+
+    if (!hostport.empty() && hostport[0] == '[') {
+        // bracketed IPv6 literal: [addr]:port
+        size_t rb = hostport.find(']');
+        if (rb == std::string::npos) {
+            return false;
+        }
+        host = hostport.substr(1, rb - 1);
+        port = (rb + 1 < hostport.size() && hostport[rb + 1] == ':')
+            ? atoi(hostport.c_str() + rb + 2) : default_port;
+    } else {
+        size_t colon = hostport.rfind(':');
+        if (colon != std::string::npos && hostport.find(':') == colon) {
+            host = hostport.substr(0, colon);
+            port = atoi(hostport.c_str() + colon + 1);
+            if (port <= 0) {
+                port = default_port;
+            }
+        } else {
+            host = hostport;
+            port = default_port;
+        }
+    }
+    return !host.empty();
+}
+
+//! Best-effort pre-flight network sandbox check before libgit2 connects
+/** Enforces QoreNetworkSecurityManager policy (SSRF / private-network /
+    cloud-metadata blocking, IP allow/deny) on the remote's resolved addresses,
+    mirroring how checkFsAccess() enforces filesystem policy.
+
+    This is advisory: libgit2 performs its own independent DNS resolution and
+    connection, so DNS rebinding between this check and libgit2's connect, HTTP
+    redirects, and proxies are not covered. Coarse all-or-nothing network control
+    remains enforced by the QDOM_NETWORK functional domain. When no sandbox
+    manager is active this is a zero-overhead fast path.
+
+    @return true if the connection is permitted (or unverifiable but no sandbox
+    is active), false with an exception raised otherwise
+*/
+static bool checkNetAccess(const char* url, ExceptionSink* xsink) {
+    QoreSandboxManagerHelper smh;
+    if (!smh) {
+        return true;  // no sandbox: fast path, no DNS overhead
+    }
+
+    std::string host;
+    int port = 0;
+    if (!parseRemoteHostPort(url, host, port)) {
+        return true;  // local/file transport: no network connection to police
+    }
+
+    char portstr[16];
+    snprintf(portstr, sizeof(portstr), "%d", port > 0 ? port : 443);
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo* res = nullptr;
+    int gai = getaddrinfo(host.c_str(), portstr, &hints, &res);
+    if (gai != 0 || !res) {
+        if (res) {
+            freeaddrinfo(res);
+        }
+        // A sandbox is active but the destination cannot be verified: fail
+        // closed (deny-by-default is the sandbox contract).
+        xsink->raiseException("NETWORK-ACCESS-DENIED",
+            "cannot resolve remote host '%s' to verify network sandbox policy: %s",
+            host.c_str(), gai_strerror(gai));
+        return false;
+    }
+
+    QoreNetworkSecurityManager& nsm = smh->network();
+    bool allowed = true;
+    for (struct addrinfo* ai = res; ai; ai = ai->ai_next) {
+        // checkConnect() on the resolved address is the authoritative,
+        // SSRF-defeating check (handles blockPrivateNetworks / CIDR rules)
+        if (!nsm.checkConnect(ai->ai_addr, ai->ai_addrlen, QSEC_NET_TCP, xsink)) {
+            allowed = false;
+            break;  // exception already raised
+        }
+    }
+    freeaddrinfo(res);
+    return allowed;
 }
 
 // --- Constructors ---
@@ -2027,6 +2175,12 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
         return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
     }
 
+    // Best-effort network sandbox pre-flight on the resolved remote address
+    if (!checkNetAccess(git_remote_url(remote), xsink)) {
+        git_remote_free(remote);
+        return -1;
+    }
+
     // Pre-operation cancel check before blocking network I/O
     if (qore_check_cancel(xsink, "git fetch")) {
         git_remote_free(remote);
@@ -2068,6 +2222,12 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
     int rc = git_remote_lookup(&remote, m_repo, rname);
     if (rc < 0) {
         return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
+    }
+
+    // Best-effort network sandbox pre-flight on the resolved remote address
+    if (!checkNetAccess(git_remote_url(remote), xsink)) {
+        git_remote_free(remote);
+        return -1;
     }
 
     // Build refspec (needs HEAD access)

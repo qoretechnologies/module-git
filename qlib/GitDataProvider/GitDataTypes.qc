@@ -24,6 +24,132 @@
 #! Contains data type classes for git data provider actions
 public namespace GitDataProvider {
 
+# --- Shared sub-types (mirror the git module's CommitInfo / DiffEntry hashdecls) ---
+
+#! Author/committer signature sub-type
+public class GitSignatureInfoDataType inherits HashDataType {
+    private {
+        const Fields = {
+            "name": {
+                "type": StringType,
+                "display_name": "Name",
+                "desc": "Author or committer name",
+            },
+            "email": {
+                "type": StringType,
+                "display_name": "Email",
+                "desc": "Author or committer email address",
+            },
+            "when": {
+                "type": DateType,
+                "display_name": "Timestamp",
+                "desc": "Commit timestamp",
+            },
+        };
+    }
+
+    constructor() {
+        addQoreFields(Fields);
+    }
+
+    #! Allows embedding as an optional nested hash field
+    constructor(Type base_type) : HashDataType(base_type, "GitSignatureInfo") {
+        addQoreFields(Fields);
+    }
+}
+
+#! Commit entry sub-type returned by the `log` action
+public class GitCommitInfoDataType inherits HashDataType {
+    private {
+        const Fields = {
+            "id": {
+                "type": StringType,
+                "display_name": "Commit ID",
+                "desc": "Full hex OID of the commit (40 characters)",
+            },
+            "short_id": {
+                "type": StringType,
+                "display_name": "Short ID",
+                "desc": "Short hex OID (7 characters)",
+            },
+            "message": {
+                "type": StringType,
+                "display_name": "Message",
+                "desc": "Full commit message",
+            },
+            "summary": {
+                "type": StringType,
+                "display_name": "Summary",
+                "desc": "First line of the commit message",
+            },
+            "author": {
+                "type": new GitSignatureInfoDataType(),
+                "display_name": "Author",
+                "desc": "Author signature (`name`, `email`, `when`)",
+            },
+            "committer": {
+                "type": new GitSignatureInfoDataType(AutoHashOrNothingType),
+                "display_name": "Committer",
+                "desc": "Committer signature (`name`, `email`, `when`); `NOTHING` if "
+                    "unavailable",
+            },
+            "parent_count": {
+                "type": IntType,
+                "display_name": "Parent Count",
+                "desc": "Number of parent commits (`0` for the root commit, `1` for a "
+                    "normal commit, `2` or more for a merge)",
+            },
+            "parent_ids": {
+                "type": new ListDataType("GitParentIds", StringType, True),
+                "display_name": "Parent IDs",
+                "desc": "List of parent commit OIDs; `NOTHING` for the root commit",
+            },
+        };
+    }
+
+    constructor() {
+        addQoreFields(Fields);
+    }
+
+    #! Allows embedding as an optional nested hash field
+    constructor(Type base_type) : HashDataType(base_type, "GitCommitInfo") {
+        addQoreFields(Fields);
+    }
+}
+
+#! Diff entry sub-type returned by the `diff` action
+public class GitDiffEntryDataType inherits HashDataType {
+    private {
+        const Fields = {
+            "status": {
+                "type": StringType,
+                "display_name": "Status",
+                "desc": "Change status: `added`, `deleted`, `modified`, `renamed`, "
+                    "`copied`, or `typechange`",
+            },
+            "path": {
+                "type": StringType,
+                "display_name": "Path",
+                "desc": "File path",
+            },
+            "old_path": {
+                "type": StringOrNothingType,
+                "display_name": "Old Path",
+                "desc": "Previous path for renames/copies; `NOTHING` otherwise",
+            },
+        };
+    }
+
+    constructor() {
+        addQoreFields(Fields);
+    }
+
+    #! Allows embedding as an optional nested hash field
+    constructor(Type base_type) : HashDataType(base_type, "GitDiffEntry") {
+        addQoreFields(Fields);
+    }
+}
+
 # --- Read File ---
 
 #! Request type for read-file action
@@ -209,10 +335,10 @@ public class GitLogResponseDataType inherits HashDataType {
     private {
         const Fields = {
             "commits": {
-                "type": AutoListType,
+                "type": new ListDataType("GitCommits", new GitCommitInfoDataType(), False),
                 "display_name": "Commits",
-                "desc": "List of commit entries with `id`, `message`, `summary`, `author`, "
-                    "and `parent_count` fields",
+                "desc": "List of commit entries, each with `id`, `short_id`, `message`, "
+                    "`summary`, `author`, `committer`, `parent_count`, and `parent_ids`",
             },
         };
     }
@@ -254,10 +380,11 @@ public class GitDiffResponseDataType inherits HashDataType {
     private {
         const Fields = {
             "changes": {
-                "type": AutoListType,
+                "type": new ListDataType("GitChanges", new GitDiffEntryDataType(), False),
                 "display_name": "Changes",
-                "desc": "List of diff entries with `status` (added/deleted/modified/renamed), "
-                    "`path`, and optional `old_path` (for renames)",
+                "desc": "List of diff entries, each with `status` "
+                    "(added/deleted/modified/renamed/copied/typechange), `path`, and "
+                    "optional `old_path` (for renames/copies)",
             },
         };
     }

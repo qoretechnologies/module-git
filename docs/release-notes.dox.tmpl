@@ -81,9 +81,28 @@
       @ref Git::GitRepository::push() "push()" hold the repository lock for the
       duration of network I/O, preventing concurrent access to the underlying
       libgit2 repository from other threads
+    - when a @ref Qore::SandboxManager "SandboxManager" is active,
+      @ref Git::GitRepository::fetch() "fetch()",
+      @ref Git::GitRepository::push() "push()",
+      @ref Git::GitRepository::pull() "pull()", and
+      @ref Git::GitRepository::connectRemote() "connectRemote()" perform a
+      best-effort network pre-flight: the remote host is resolved and every
+      resolved address is validated against the network security policy
+      (SSRF / private-network / cloud-metadata blocking) before connecting,
+      throwing \c NETWORK-ACCESS-DENIED on a policy violation. This is
+      advisory (libgit2 resolves/connects independently); coarse control
+      remains enforced by the \c NETWORK functional domain
     - GitForgeHelper validates the GitLab instance URL (scheme, host, no embedded
       credentials; cleartext \c http requires an explicit \c allow_insecure
       option) before attaching the API token, and re-raises REST failures without
       credential-bearing request context
     - GitConnections rejects \c ".." path components in \c gitlocal:// URLs
+
+    <b>GitDataProvider</b>
+    - the \c log and \c diff action responses now use typed sub-types
+      (\c GitCommitInfoDataType / \c GitSignatureInfoDataType /
+      \c GitDiffEntryDataType) instead of untyped lists, so the UI exposes
+      per-field mapping of commit and diff results
+    - the \c diff and \c log actions preselect their options so the action
+      form is populated rather than empty
 */

@@ -27,6 +27,7 @@
 %requires git >= 1.0
 %requires GitForgeHelper
 %requires GitConnections
+%requires GitDataProvider
 %requires QUnit
 
 %exec-class GitSecurityTest
@@ -50,6 +51,8 @@ public class GitSecurityTest inherits QUnit::Test {
         addTestCase("L2: zero-length blob round-trips", \testEmptyBlob());
         addTestCase("H3: GitForgeHelper URL validation", \testForgeUrlValidation());
         addTestCase("M3: gitlocal connection rejects ..", \testGitLocalTraversal());
+        addTestCase("Audit-b: typed log/diff response schema", \testTypedResponseSchema());
+        addTestCase("Audit-c: network sandbox pre-flight", \testNetworkSandboxPreflight());
 
         set_return_value(main());
     }
@@ -242,5 +245,63 @@ public class GitSecurityTest inherits QUnit::Test {
         assertThrows("GIT-CONNECTION-ERROR", sub () {
             conn.get(True);
         }, NOTHING, "gitlocal URL with .. is rejected");
+    }
+
+    private testTypedResponseSchema() {
+        # the log/diff response sub-types must expose the git module's
+        # CommitInfo/DiffEntry schema (not a generic untyped list/hash)
+        GitDataProvider::GitSignatureInfoDataType sig();
+        *hash<string, AbstractDataField> sf = sig.getFields();
+        assertEq(("name", "email", "when"), keys sf, "signature type fields");
+
+        GitDataProvider::GitCommitInfoDataType ci();
+        *hash<string, AbstractDataField> cf = ci.getFields();
+        assertEq(("id", "short_id", "message", "summary", "author", "committer",
+            "parent_count", "parent_ids"), keys cf, "commit type fields");
+
+        GitDataProvider::GitDiffEntryDataType de();
+        *hash<string, AbstractDataField> df = de.getFields();
+        assertEq(("status", "path", "old_path"), keys df, "diff entry type fields");
+
+        # the response types must wrap the typed sub-types, not AutoListType
+        GitDataProvider::GitLogResponseDataType lr();
+        assertEq(("commits",), keys lr.getFields(), "log response has commits");
+        GitDataProvider::GitDiffResponseDataType dr();
+        assertEq(("changes",), keys dr.getFields(), "diff response has changes");
+
+        # round-trip: the typed schema must still carry real data through the
+        # data provider action
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "T");
+        repo.configSet("user.email", "t@t.com");
+        repo.writeFileString("a.txt", "one\n");
+        repo.commit("first");
+        GitDataProvider::GitDataProvider dp(repo);
+        AbstractDataProvider logp = dp.getChildProvider("log");
+        hash<auto> resp = logp.doRequest({});
+        assertEq("first", resp.commits[0].summary, "typed log still returns data");
+        assertEq("T", resp.commits[0].author.name, "nested author mapped");
+    }
+
+    private testNetworkSandboxPreflight() {
+        # With a sandbox that blocks private networks, the pre-flight check must
+        # deny a fetch to a loopback remote BEFORE libgit2 connects. Filesystem
+        # is allowed so the virtual->disk migration still works.
+        SandboxManager sm();
+        sm.setFilesystemDefaultPolicy(True);
+        sm.setNetworkDefaultPolicy(True);
+        sm.blockPrivateNetworks();
+
+        Program p(PO_NEW_STYLE);
+        p.loadModule("git");
+        p.setSandboxManager(sm);
+        p.parse("sub do_fetch() {
+            Git::GitRepository repo = Git::GitRepository::createVirtual();
+            repo.addRemote('origin', 'http://127.0.0.1:9/x.git');
+            repo.fetch();
+        }", "net-sandbox");
+        assertThrows("NETWORK-ACCESS-DENIED", sub () {
+            p.callFunction("do_fetch");
+        }, NOTHING, "fetch to loopback denied by network sandbox pre-flight");
     }
 }
