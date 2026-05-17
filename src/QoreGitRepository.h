@@ -43,12 +43,17 @@ class QoreGitRepository : public AbstractPrivateData {
 private:
     git_repository* m_repo = nullptr;
     git_index* m_index = nullptr;     // in-memory index for virtual mode
-    std::string m_path;               // repo path (disk mode) or temp bare repo path (virtual mode)
-    bool m_virtual = false;           // true = virtual mode (temp bare repo + in-memory working tree)
+    std::string m_path;               // repo path (disk mode) or temp bare repo path (after migration)
+    bool m_virtual = false;           // true = virtual mode (in-memory working tree semantics)
+    bool m_in_memory = false;         // true = object store is purely in-memory (no disk repo at all)
+    bool m_tempdir_created = false;   // true = m_path is a temp dir we created and must remove
     mutable QoreThreadLock m_lock;
 
     // Virtual working tree: maps path -> blob OID
     std::map<std::string, git_oid> m_virtual_tree;
+
+    // In-memory git config (used only in pure in-memory mode, before any migration)
+    std::map<std::string, std::string> m_mem_config;
 
     DLLLOCAL QoreGitRepository(const QoreGitRepository&) = delete;
     DLLLOCAL QoreGitRepository& operator=(const QoreGitRepository&) = delete;
@@ -59,6 +64,16 @@ private:
     //! Populates m_virtual_tree from a git_tree (recursive)
     DLLLOCAL int populateVirtualTreeFromGitTree(const git_tree* tree, const std::string& prefix,
                                                 ExceptionSink* xsink);
+
+    //! Migrates a pure in-memory repository to a disk-backed temporary bare repo
+    /** Required before fetch/push: libgit2's smart-transport pack negotiation needs
+        writepack support, which only the disk-backed ODB provides. All objects,
+        refs, HEAD and config are copied to the new repo. m_lock must be held.
+    */
+    DLLLOCAL int migrateToDisk(ExceptionSink* xsink);
+
+    //! If user.name and user.email are configured, replaces *sig with a signature using them
+    DLLLOCAL void overrideSignatureFromConfig(git_signature*& sig);
 
     //! nftw callback for recursive directory removal
     static int removePath(const char* path, const struct stat* sb, int typeflag, struct FTW* ftwbuf) {
@@ -84,9 +99,11 @@ protected:
             git_repository_free(m_repo);
             m_repo = nullptr;
         }
-        // In virtual mode, clean up the temp bare repo directory
-        if (m_virtual && !m_path.empty()) {
+        // Only remove a temp directory that we created ourselves (never a
+        // user-supplied repository path)
+        if (m_tempdir_created && !m_path.empty()) {
             nftw(m_path.c_str(), removePath, 64, FTW_DEPTH | FTW_PHYS);
+            qore_git_unregister_tempdir(m_path);
         }
     }
 

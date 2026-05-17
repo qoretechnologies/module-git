@@ -28,7 +28,38 @@
 #include "git-module.h"
 #include "QC_GitRepository.h"
 
+#include <ftw.h>
+#include <set>
+#include <unistd.h>
+
 static QoreNamespace gitns("Qore::Git");
+
+// Registry of temp directories created for virtual repos, so they can be
+// reclaimed at module unload even if an owning object is leaked.
+static QoreThreadLock git_tempdir_lock;
+static std::set<std::string> git_tempdirs;
+
+static int git_tempdir_rm_cb(const char* path, const struct stat*, int, struct FTW*) {
+    return ::remove(path);
+}
+
+DLLLOCAL void qore_git_register_tempdir(const std::string& path) {
+    AutoLocker al(git_tempdir_lock);
+    git_tempdirs.insert(path);
+}
+
+DLLLOCAL void qore_git_unregister_tempdir(const std::string& path) {
+    AutoLocker al(git_tempdir_lock);
+    git_tempdirs.erase(path);
+}
+
+DLLLOCAL void qore_git_cleanup_all_tempdirs() {
+    AutoLocker al(git_tempdir_lock);
+    for (const std::string& path : git_tempdirs) {
+        nftw(path.c_str(), git_tempdir_rm_cb, 64, FTW_DEPTH | FTW_PHYS);
+    }
+    git_tempdirs.clear();
+}
 
 // hashdecl global pointers — set during module init
 TypedHashDecl* hashdeclGitSignatureInfo = nullptr;
@@ -134,5 +165,6 @@ static void git_module_ns_init(QoreNamespace* rns, QoreNamespace* qns, Exception
 
 static void git_module_delete() {
     gitns.clear(nullptr);
+    qore_git_cleanup_all_tempdirs();
     git_libgit2_shutdown();
 }

@@ -3,7 +3,8 @@ version 1.0
 ***********
 
 initial release:
-- Git::GitRepository class for repository operations (open, init, clone)
+- Git::GitRepository class for repository operations (open, init, and
+  genuinely in-memory virtual repositories)
 - index/staging operations (add, remove, reset)
 - commit creation and history traversal
 - branch and tag management
@@ -12,7 +13,8 @@ initial release:
 - merge with conflict detection
 - stash, blame, config operations
 - revision walking with sorting
-- credential handling (SSH key, password, agent)
+- git transport authentication delegated to libgit2 (SSH agent, credential
+  helpers); credentials are never stored or logged by this module
 - sandboxing support (QDOM_FILESYSTEM, QDOM_NETWORK)
 - cooperative cancellation for blocking operations
 - GitDataProvider module for data provider integration
@@ -20,3 +22,15 @@ initial release:
 - GitConfigManager module for high-level configuration management
 - GitConfigWatcher with observer pattern for change detection
 - GitForgeHelper module for GitHub/GitLab PR/MR creation
+
+security and robustness:
+- createVirtual() repositories are fully in-memory with no filesystem
+  footprint; a 0700 temp repo (honoring TMPDIR) is created transparently
+  only when a remote is added, and is reclaimed at module unload
+- file paths are validated against absolute-path and ".." traversal; disk
+  writes use O_NOFOLLOW to defeat working-tree symlink attacks
+- remote URLs reject the "ext::" arbitrary-command transport
+- fetch()/push() hold the repository lock across network I/O
+- GitForgeHelper validates the GitLab URL before attaching the API token
+  and scrubs credential context from REST errors
+- GitConnections rejects ".." in gitlocal:// URLs

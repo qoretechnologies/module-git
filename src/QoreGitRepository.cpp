@@ -26,11 +26,20 @@
 */
 
 #include "QoreGitRepository.h"
+#include "QoreGitMemoryODB.h"
+#include "QoreGitMemoryRefDB.h"
 
 #include <qore/QoreSandboxManager.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <sys/stat.h>
+
+//! nftw callback for best-effort recursive directory removal
+static int qore_git_rm_cb(const char* path, const struct stat*, int, struct FTW*) {
+    return ::remove(path);
+}
 
 //! Helper to check filesystem sandbox access
 static bool checkFsAccess(const char* path, int mode, ExceptionSink* xsink) {
@@ -39,6 +48,64 @@ static bool checkFsAccess(const char* path, int mode, ExceptionSink* xsink) {
         if (!smh->filesystem().checkAccess(path, mode, xsink)) {
             return false;
         }
+    }
+    return true;
+}
+
+//! Validates a repository-relative path
+/** Rejects empty paths, absolute paths, and any ".." path component to prevent escaping
+    the repository working tree (path traversal). This is enforced unconditionally, i.e.
+    independently of whether a QoreSandboxManager is active, since the sandbox check is a
+    no-op when no sandbox manager is installed.
+
+    @return true if the path is safe to use, false (with an exception raised) otherwise
+*/
+static bool validateRepoPath(const char* path, ExceptionSink* xsink) {
+    if (!path || !*path) {
+        xsink->raiseException("GIT-PATH-ERROR", "an empty file path is not allowed");
+        return false;
+    }
+    if (path[0] == '/') {
+        xsink->raiseException("GIT-PATH-ERROR", "absolute path '%s' is not allowed; "
+            "repository paths must be relative to the working tree", path);
+        return false;
+    }
+    // reject any ".." path component (handles "..", "../x", "x/../y", "x/..")
+    const char* p = path;
+    while (*p) {
+        const char* slash = strchr(p, '/');
+        size_t len = slash ? static_cast<size_t>(slash - p) : strlen(p);
+        if (len == 2 && p[0] == '.' && p[1] == '.') {
+            xsink->raiseException("GIT-PATH-ERROR",
+                "path traversal (\"..\") is not allowed in path '%s'", path);
+            return false;
+        }
+        if (!slash) {
+            break;
+        }
+        p = slash + 1;
+    }
+    return true;
+}
+
+//! Validates a remote URL
+/** Rejects empty URLs and the "ext::" smart-transport scheme, which executes an
+    arbitrary command. All standard transports (https, http, ssh, git, file, and local
+    paths) are allowed; access to these is gated by the NETWORK/FILESYSTEM functional
+    domains of the calling methods.
+
+    @return true if the URL is acceptable, false (with an exception raised) otherwise
+*/
+static bool validateRemoteUrl(const char* url, ExceptionSink* xsink) {
+    if (!url || !*url) {
+        xsink->raiseException("GIT-REMOTE-ERROR", "an empty remote URL is not allowed");
+        return false;
+    }
+    if (!strncmp(url, "ext::", 5)) {
+        xsink->raiseException("GIT-REMOTE-ERROR",
+            "remote URL scheme \"ext::\" is not allowed: it would execute an arbitrary "
+            "command; use a standard transport (https, ssh, git, or file)");
+        return false;
     }
     return true;
 }
@@ -68,33 +135,283 @@ QoreGitRepository::QoreGitRepository(const char* path, bool bare, ExceptionSink*
 }
 
 QoreGitRepository::QoreGitRepository(bool virtual_mode, ExceptionSink* xsink)
-    : m_virtual(true) {
-    // Create a temporary bare repo on disk for the object store and refdb.
-    // This is needed because libgit2's fetch/push protocol requires writepack support
-    // (pack file I/O), which only the disk-backed ODB provides.
-    // The working tree remains fully virtual — m_virtual_tree maps paths to blob OIDs.
-    char tmpdir[] = "/tmp/qore-git-virt-XXXXXX";
-    if (!mkdtemp(tmpdir)) {
-        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to create temp directory for virtual repo");
-        return;
-    }
-    m_path = tmpdir;
-
-    int rc = git_repository_init(&m_repo, tmpdir, 1);  // bare repo
+    : m_virtual(true), m_in_memory(true) {
+    // Pure in-memory repository: no filesystem footprint at all. Object store and
+    // refdb live in memory; the working tree is virtual (m_virtual_tree maps paths
+    // to blob OIDs). If a remote is later added, migrateToDisk() transparently
+    // converts this to a disk-backed temp repo (fetch/push need writepack support).
+    int rc = git_repository_new(&m_repo);
     if (rc < 0) {
-        nftw(tmpdir, removePath, 64, FTW_DEPTH | FTW_PHYS);
         git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create virtual repository");
         return;
     }
 
-    // Create in-memory index for the virtual working tree
+    // Attach the in-memory object database backend
+    git_odb* odb = nullptr;
+    rc = git_odb_new(&odb);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory ODB");
+        return;
+    }
+    git_odb_backend* odb_backend = nullptr;
+    if (qore_git_memory_odb_new(&odb_backend) < 0 ||
+        git_odb_add_backend(odb, odb_backend, 1) < 0) {
+        git_odb_free(odb);
+        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to attach in-memory ODB backend");
+        return;
+    }
+    git_repository_set_odb(m_repo, odb);
+    git_odb_free(odb);  // repository retains its own reference
+
+    // Attach the in-memory reference database backend
+    git_refdb* refdb = nullptr;
+    rc = git_refdb_new(&refdb, m_repo);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory refdb");
+        return;
+    }
+    git_refdb_backend* refdb_backend = nullptr;
+    if (qore_git_memory_refdb_new(&refdb_backend) < 0 ||
+        git_refdb_set_backend(refdb, refdb_backend) < 0) {
+        git_refdb_free(refdb);
+        xsink->raiseException("GIT-VIRTUAL-ERROR", "failed to attach in-memory refdb backend");
+        return;
+    }
+    git_repository_set_refdb(m_repo, refdb);
+    git_refdb_free(refdb);  // repository retains its own reference
+
+    // Attach an empty in-memory config. This makes git config lookups resolve to
+    // "not found" (defaults are used) and, importantly, prevents libgit2 from
+    // reading the user's global/system git config. configSet()/configGet() use
+    // m_mem_config instead while in pure in-memory mode.
+    git_config* cfg = nullptr;
+    rc = git_config_new(&cfg);
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory config");
+        return;
+    }
+    git_repository_set_config(m_repo, cfg);
+    git_config_free(cfg);  // repository retains its own reference
+
+    // Create the in-memory index for the virtual working tree
     rc = git_index_new(&m_index);
     if (rc < 0) {
         git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc, "failed to create in-memory index");
         return;
     }
-
     git_repository_set_index(m_repo, m_index);
+}
+
+int QoreGitRepository::migrateToDisk(ExceptionSink* xsink) {
+    // m_lock is held by the caller
+    if (!m_in_memory) {
+        return 0;  // already disk-backed
+    }
+
+    // Create a private temp directory (honor TMPDIR) with 0700 permissions
+    const char* tmp_base = getenv("TMPDIR");
+    std::string tmpl = (tmp_base && *tmp_base) ? tmp_base : "/tmp";
+    if (!tmpl.empty() && tmpl.back() == '/') {
+        tmpl.pop_back();
+    }
+    tmpl += "/qore-git-virt-XXXXXX";
+    std::vector<char> tmpbuf(tmpl.begin(), tmpl.end());
+    tmpbuf.push_back('\0');
+    if (!mkdtemp(tmpbuf.data())) {
+        xsink->raiseException("GIT-VIRTUAL-ERROR",
+            "failed to create temp directory for remote-backed virtual repo: %s",
+            strerror(errno));
+        return -1;
+    }
+    std::string tmpdir(tmpbuf.data());
+
+    git_repository* disk_repo = nullptr;
+    int rc = git_repository_init(&disk_repo, tmpdir.c_str(), 1);  // bare
+    if (rc < 0) {
+        nftw(tmpdir.c_str(), removePath, 64, FTW_DEPTH | FTW_PHYS);
+        return git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", rc,
+            "failed to initialize disk-backed repository for migration");
+    }
+
+    // RAII cleanup of disk_repo/tmpdir on any failure before the final swap
+    struct MigrateGuard {
+        git_repository* repo;
+        std::string dir;
+        bool commit;
+        MigrateGuard(git_repository* r, const std::string& d)
+            : repo(r), dir(d), commit(false) {}
+        ~MigrateGuard() {
+            if (!commit) {
+                if (repo) {
+                    git_repository_free(repo);
+                }
+                if (!dir.empty()) {
+                    nftw(dir.c_str(), qore_git_rm_cb, 64, FTW_DEPTH | FTW_PHYS);
+                }
+            }
+        }
+    } guard(disk_repo, tmpdir);
+
+    // Copy all objects from the in-memory ODB to the disk ODB
+    git_odb* src_odb = nullptr;
+    git_odb* dst_odb = nullptr;
+    if (git_repository_odb(&src_odb, m_repo) < 0 ||
+        git_repository_odb(&dst_odb, disk_repo) < 0) {
+        if (src_odb) { git_odb_free(src_odb); }
+        if (dst_odb) { git_odb_free(dst_odb); }
+        return git_raise_exception(xsink, "GIT-VIRTUAL-ERROR", "failed to access object databases for migration");
+    }
+
+    struct OdbCopyCtx {
+        git_odb* src;
+        git_odb* dst;
+        ExceptionSink* xsink;
+        int err;
+        int count;
+    } ctx{src_odb, dst_odb, xsink, 0, 0};
+
+    auto odb_copy_cb = [](const git_oid* oid, void* payload) -> int {
+        OdbCopyCtx* c = static_cast<OdbCopyCtx*>(payload);
+        // cooperative cancellation: object copy can be large
+        if ((++c->count % 100) == 0 && qore_check_cancel(c->xsink, "git migrate")) {
+            c->err = -1;
+            return -1;
+        }
+        git_odb_object* obj = nullptr;
+        if (git_odb_read(&obj, c->src, oid) < 0) {
+            c->err = -1;
+            return -1;
+        }
+        git_oid out_oid;
+        int wr = git_odb_write(&out_oid, c->dst, git_odb_object_data(obj),
+                               git_odb_object_size(obj), git_odb_object_type(obj));
+        git_odb_object_free(obj);
+        if (wr < 0) {
+            c->err = -1;
+            return -1;
+        }
+        return 0;
+    };
+    rc = git_odb_foreach(src_odb, odb_copy_cb, &ctx);
+    git_odb_free(src_odb);
+    git_odb_free(dst_odb);
+    if (*xsink) {
+        return -1;  // cancellation — exception already set
+    }
+    if (rc < 0 || ctx.err < 0) {
+        return git_raise_exception(xsink, "GIT-VIRTUAL-ERROR",
+            "failed to copy git objects during migration to disk");
+    }
+
+    // Copy all references
+    git_strarray ref_names = {nullptr, 0};
+    if (git_reference_list(&ref_names, m_repo) == 0) {
+        for (size_t i = 0; i < ref_names.count; ++i) {
+            if ((i % 100) == 0 && qore_check_cancel(xsink, "git migrate")) {
+                git_strarray_dispose(&ref_names);
+                return -1;
+            }
+            git_reference* r = nullptr;
+            if (git_reference_lookup(&r, m_repo, ref_names.strings[i]) != 0) {
+                continue;
+            }
+            git_reference* nr = nullptr;
+            if (git_reference_type(r) == GIT_REFERENCE_SYMBOLIC) {
+                git_reference_symbolic_create(&nr, disk_repo, ref_names.strings[i],
+                    git_reference_symbolic_target(r), 1, nullptr);
+            } else {
+                git_reference_create(&nr, disk_repo, ref_names.strings[i],
+                    git_reference_target(r), 1, nullptr);
+            }
+            if (nr) {
+                git_reference_free(nr);
+            }
+            git_reference_free(r);
+        }
+        git_strarray_dispose(&ref_names);
+    }
+
+    // Replicate HEAD (not part of git_reference_list)
+    git_reference* head = nullptr;
+    if (git_reference_lookup(&head, m_repo, "HEAD") == 0) {
+        git_reference* nh = nullptr;
+        if (git_reference_type(head) == GIT_REFERENCE_SYMBOLIC) {
+            git_reference_symbolic_create(&nh, disk_repo, "HEAD",
+                git_reference_symbolic_target(head), 1, nullptr);
+        } else {
+            git_reference_create(&nh, disk_repo, "HEAD", git_reference_target(head),
+                1, nullptr);
+        }
+        if (nh) {
+            git_reference_free(nh);
+        }
+        git_reference_free(head);
+    }
+
+    // Copy the in-memory config into the disk repo's (writable) config
+    if (!m_mem_config.empty()) {
+        git_config* dcfg = nullptr;
+        if (git_repository_config(&dcfg, disk_repo) == 0) {
+            for (const auto& kv : m_mem_config) {
+                git_config_set_string(dcfg, kv.first.c_str(), kv.second.c_str());
+            }
+            git_config_free(dcfg);
+        }
+    }
+
+    // Re-attach our in-memory working index to the new repo
+    git_repository_set_index(disk_repo, m_index);
+
+    // Commit the swap: the old in-memory repo (and its memory backends) is freed
+    git_repository_free(m_repo);
+    m_repo = disk_repo;
+    m_path = tmpdir;
+    m_in_memory = false;
+    m_tempdir_created = true;
+    guard.commit = true;
+    qore_git_register_tempdir(tmpdir);
+    return 0;
+}
+
+void QoreGitRepository::overrideSignatureFromConfig(git_signature*& sig) {
+    std::string name;
+    std::string email;
+    if (m_in_memory) {
+        auto n = m_mem_config.find("user.name");
+        auto e = m_mem_config.find("user.email");
+        if (n == m_mem_config.end() || e == m_mem_config.end()) {
+            return;
+        }
+        name = n->second;
+        email = e->second;
+    } else {
+        git_config* config = nullptr;
+        if (git_repository_config(&config, m_repo) != 0) {
+            return;
+        }
+        git_config_entry* name_entry = nullptr;
+        git_config_entry* email_entry = nullptr;
+        if (git_config_get_entry(&name_entry, config, "user.name") == 0 &&
+            git_config_get_entry(&email_entry, config, "user.email") == 0) {
+            name = name_entry->value;
+            email = email_entry->value;
+        }
+        if (email_entry) {
+            git_config_entry_free(email_entry);
+        }
+        if (name_entry) {
+            git_config_entry_free(name_entry);
+        }
+        git_config_free(config);
+        if (name.empty() || email.empty()) {
+            return;
+        }
+    }
+    git_signature* new_sig = nullptr;
+    if (git_signature_now(&new_sig, name.c_str(), email.c_str()) == 0) {
+        git_signature_free(sig);
+        sig = new_sig;
+    }
 }
 
 // --- Info Methods ---
@@ -165,6 +482,9 @@ int QoreGitRepository::addToIndex(const char* path, ExceptionSink* xsink) {
         xsink->raiseException("GIT-MODE-ERROR", "add() requires a disk-backed repository; use writeFile() for virtual repos");
         return -1;
     }
+    if (!validateRepoPath(path, xsink)) {
+        return -1;
+    }
 
     git_index* index = nullptr;
     int rc = git_repository_index(&index, m_repo);
@@ -195,6 +515,9 @@ int QoreGitRepository::removeFromIndex(const char* path, ExceptionSink* xsink) {
         xsink->raiseException("GIT-MODE-ERROR", "remove() requires a disk-backed repository; use deleteFile() for virtual repos");
         return -1;
     }
+    if (!validateRepoPath(path, xsink)) {
+        return -1;
+    }
 
     git_index* index = nullptr;
     int rc = git_repository_index(&index, m_repo);
@@ -221,6 +544,9 @@ int QoreGitRepository::removeFromIndex(const char* path, ExceptionSink* xsink) {
 BinaryNode* QoreGitRepository::readFile(const char* path, ExceptionSink* xsink) {
     AutoLocker al(m_lock);
     if (!checkRepo(xsink)) {
+        return nullptr;
+    }
+    if (!validateRepoPath(path, xsink)) {
         return nullptr;
     }
 
@@ -312,6 +638,9 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
     if (!checkRepo(xsink)) {
         return -1;
     }
+    if (!validateRepoPath(path, xsink)) {
+        return -1;
+    }
 
     // Create blob from buffer
     git_oid blob_oid;
@@ -347,8 +676,19 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
                 }
             }
 
-            FILE* f = fopen(full_path.c_str(), "wb");
+            // O_NOFOLLOW: refuse to write through a symlink at the final path
+            // component, so a symlink planted in the working tree cannot be used
+            // to overwrite an arbitrary file outside the repository
+            int fd = open(full_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+            if (fd < 0) {
+                xsink->raiseException("GIT-WRITE-ERROR",
+                    "failed to open file '%s' for writing: %s",
+                    full_path.c_str(), strerror(errno));
+                return -1;
+            }
+            FILE* f = fdopen(fd, "wb");
             if (!f) {
+                ::close(fd);
                 xsink->raiseException("GIT-WRITE-ERROR",
                     "failed to open file '%s' for writing: %s",
                     full_path.c_str(), strerror(errno));
@@ -387,6 +727,9 @@ int QoreGitRepository::deleteFile(const char* path, ExceptionSink* xsink) {
     if (!checkRepo(xsink)) {
         return -1;
     }
+    if (!validateRepoPath(path, xsink)) {
+        return -1;
+    }
 
     auto it = m_virtual_tree.find(path);
     if (it != m_virtual_tree.end()) {
@@ -418,6 +761,9 @@ int QoreGitRepository::deleteFile(const char* path, ExceptionSink* xsink) {
 bool QoreGitRepository::fileExists(const char* path, ExceptionSink* xsink) {
     AutoLocker al(m_lock);
     if (!checkRepo(xsink)) {
+        return false;
+    }
+    if (!validateRepoPath(path, xsink)) {
         return false;
     }
 
@@ -561,24 +907,7 @@ QoreStringNode* QoreGitRepository::commit(const char* message, ExceptionSink* xs
         }
 
         // Check for config-based signature override
-        git_config* config = nullptr;
-        if (git_repository_config(&config, m_repo) == 0) {
-            git_config_entry* name_entry = nullptr;
-            git_config_entry* email_entry = nullptr;
-            if (git_config_get_entry(&name_entry, config, "user.name") == 0 &&
-                git_config_get_entry(&email_entry, config, "user.email") == 0) {
-                git_signature* new_sig = nullptr;
-                if (git_signature_now(&new_sig, name_entry->value, email_entry->value) == 0) {
-                    git_signature_free(sig);
-                    sig = new_sig;
-                }
-                git_config_entry_free(email_entry);
-            }
-            if (name_entry) {
-                git_config_entry_free(name_entry);
-            }
-            git_config_free(config);
-        }
+        overrideSignatureFromConfig(sig);
 
         // Determine parent
         git_commit* parent = nullptr;
@@ -808,6 +1137,13 @@ int QoreGitRepository::configSet(const char* key, const char* value, ExceptionSi
         return -1;
     }
 
+    if (m_in_memory) {
+        // pure in-memory mode: keep config in our own map (no disk, and the
+        // user's global/system git config is never touched)
+        m_mem_config[key] = value;
+        return 0;
+    }
+
     git_config* config = nullptr;
     int rc = git_repository_config(&config, m_repo);
     if (rc < 0) {
@@ -826,6 +1162,14 @@ QoreStringNode* QoreGitRepository::configGet(const char* key, ExceptionSink* xsi
     AutoLocker al(m_lock);
     if (!checkRepo(xsink)) {
         return nullptr;
+    }
+
+    if (m_in_memory) {
+        auto it = m_mem_config.find(key);
+        if (it == m_mem_config.end()) {
+            return nullptr;
+        }
+        return new QoreStringNode(it->second.c_str());
     }
 
     git_config* config = nullptr;
@@ -1633,6 +1977,15 @@ int QoreGitRepository::addRemote(const char* name, const char* url, ExceptionSin
     if (!checkRepo(xsink)) {
         return -1;
     }
+    if (!validateRemoteUrl(url, xsink)) {
+        return -1;
+    }
+
+    // A remote implies fetch/push, which need writepack support (disk-backed ODB).
+    // Transparently migrate a pure in-memory repo to a disk-backed temp repo here.
+    if (m_in_memory && migrateToDisk(xsink) < 0) {
+        return -1;
+    }
 
     git_remote* remote = nullptr;
     int rc = git_remote_create(&remote, m_repo, name, url);
@@ -1657,20 +2010,21 @@ int QoreGitRepository::removeRemote(const char* name, ExceptionSink* xsink) {
 }
 
 int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
+    // The lock is held for the entire operation. libgit2's git_repository is not
+    // safe for concurrent use from multiple threads, so the blocking network I/O
+    // must not run while another thread can access or mutate the same repository
+    // object. Cooperative cancellation still works via the transfer-progress
+    // callback (invoked on this thread).
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
+
+    const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
     git_remote* remote = nullptr;
-
-    // Hold lock only for repo access and remote lookup
-    {
-        AutoLocker al(m_lock);
-        if (!checkRepo(xsink)) {
-            return -1;
-        }
-
-        const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
-        int rc = git_remote_lookup(&remote, m_repo, rname);
-        if (rc < 0) {
-            return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
-        }
+    int rc = git_remote_lookup(&remote, m_repo, rname);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
     }
 
     // Pre-operation cancel check before blocking network I/O
@@ -1684,8 +2038,7 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
     opts.callbacks.transfer_progress = qore_git_transfer_progress_cb;
     opts.callbacks.payload = xsink;
 
-    // Network I/O runs without the lock so other read operations are not blocked
-    int rc = git_remote_fetch(remote, nullptr, &opts, "fetch");
+    rc = git_remote_fetch(remote, nullptr, &opts, "fetch");
     git_remote_free(remote);
     if (rc < 0) {
         if (*xsink) {
@@ -1698,35 +2051,37 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
 }
 
 int QoreGitRepository::push(const char* remote_name, const char* refspec, ExceptionSink* xsink) {
-    git_remote* remote = nullptr;
     std::string rs;
 
-    // Hold lock only for repo access, remote lookup, and HEAD resolution
-    {
-        AutoLocker al(m_lock);
-        if (!checkRepo(xsink)) {
-            return -1;
-        }
+    // The lock is held for the entire operation. libgit2's git_repository is not
+    // safe for concurrent use from multiple threads, so the blocking network I/O
+    // must not run while another thread can access or mutate the same repository
+    // object. Cooperative cancellation still works via the transfer-progress
+    // callback (invoked on this thread).
+    AutoLocker al(m_lock);
+    if (!checkRepo(xsink)) {
+        return -1;
+    }
 
-        const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
-        int rc = git_remote_lookup(&remote, m_repo, rname);
-        if (rc < 0) {
-            return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
-        }
+    const char* rname = (remote_name && *remote_name) ? remote_name : "origin";
+    git_remote* remote = nullptr;
+    int rc = git_remote_lookup(&remote, m_repo, rname);
+    if (rc < 0) {
+        return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
+    }
 
-        // Build refspec while holding the lock (needs HEAD access)
-        if (refspec && *refspec) {
-            rs = refspec;
+    // Build refspec (needs HEAD access)
+    if (refspec && *refspec) {
+        rs = refspec;
+    } else {
+        git_reference* head_ref = nullptr;
+        rc = git_repository_head(&head_ref, m_repo);
+        if (rc == 0) {
+            const char* head_name = git_reference_name(head_ref);
+            rs = std::string(head_name) + ":" + head_name;
+            git_reference_free(head_ref);
         } else {
-            git_reference* head_ref = nullptr;
-            rc = git_repository_head(&head_ref, m_repo);
-            if (rc == 0) {
-                const char* head_name = git_reference_name(head_ref);
-                rs = std::string(head_name) + ":" + head_name;
-                git_reference_free(head_ref);
-            } else {
-                rs = "refs/heads/main:refs/heads/main";
-            }
+            rs = "refs/heads/main:refs/heads/main";
         }
     }
 
@@ -1746,8 +2101,7 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
     refspecs.strings = &rs_ptr;
     refspecs.count = 1;
 
-    // Network I/O runs without the lock so other read operations are not blocked
-    int rc = git_remote_push(remote, &refspecs, &opts);
+    rc = git_remote_push(remote, &refspecs, &opts);
     git_remote_free(remote);
     if (rc < 0) {
         if (*xsink) {
@@ -1843,6 +2197,14 @@ QoreStringNode* QoreGitRepository::getState(ExceptionSink* xsink) {
     AutoLocker al(m_lock);
     if (!checkRepo(xsink)) {
         return nullptr;
+    }
+
+    // A pure in-memory repository has no on-disk state files (MERGE_HEAD, etc.)
+    // and never enters a pending merge/rebase/bisect state: merge() is atomic and
+    // writes no state files. git_repository_state() relies on those files, so
+    // report "none" explicitly here.
+    if (m_in_memory) {
+        return new QoreStringNode("none");
     }
 
     int state = git_repository_state(m_repo);
@@ -2174,15 +2536,18 @@ BinaryNode* QoreGitRepository::lookupBlobContent(const git_oid* oid, bool has_oi
     }
     const void* content = git_blob_rawcontent(blob);
     git_object_size_t size = git_blob_rawsize(blob);
-    // BinaryNode takes ownership of malloc'd data
-    void* copy = malloc((size_t)size);
-    if (!copy) {
+    // BinaryNode takes ownership of malloc'd data; an empty blob yields an empty
+    // BinaryNode (malloc(0) may legitimately return nullptr — not an error)
+    void* copy = size ? malloc((size_t)size) : nullptr;
+    if (size && !copy) {
         git_blob_free(blob);
         xsink->raiseException("GIT-MERGE-ERROR", "failed to allocate %zu bytes for blob content",
             (size_t)size);
         return nullptr;
     }
-    memcpy(copy, content, (size_t)size);
+    if (size) {
+        memcpy(copy, content, (size_t)size);
+    }
     BinaryNode* result = new BinaryNode(copy, (size_t)size);
     git_blob_free(blob);
     return result;
@@ -2350,24 +2715,7 @@ QoreStringNode* QoreGitRepository::createMergeCommit(const char* message,
     }
 
     // Check for config-based signature override
-    git_config* config = nullptr;
-    if (git_repository_config(&config, m_repo) == 0) {
-        git_config_entry* name_entry = nullptr;
-        git_config_entry* email_entry = nullptr;
-        if (git_config_get_entry(&name_entry, config, "user.name") == 0 &&
-            git_config_get_entry(&email_entry, config, "user.email") == 0) {
-            git_signature* new_sig = nullptr;
-            if (git_signature_now(&new_sig, name_entry->value, email_entry->value) == 0) {
-                git_signature_free(sig);
-                sig = new_sig;
-            }
-            git_config_entry_free(email_entry);
-        }
-        if (name_entry) {
-            git_config_entry_free(name_entry);
-        }
-        git_config_free(config);
-    }
+    overrideSignatureFromConfig(sig);
 
     // Determine which ref to update
     std::string update_ref;
@@ -2882,17 +3230,22 @@ QoreHashNode* QoreGitRepository::merge(const char* ref, const QoreHashNode* opts
 
         if (rv->getType() == NT_STRING) {
             QoreStringValueHelper str(*rv);
-            void* copy = malloc(str->size());
-            if (!copy) {
+            size_t slen = str->size();
+            // an empty resolution string yields an empty BinaryNode (malloc(0)
+            // may legitimately return nullptr — not an error)
+            void* copy = slen ? malloc(slen) : nullptr;
+            if (slen && !copy) {
                 for (size_t j = i + 1; j < conflict_hashes.size(); j++) {
                     conflict_hashes[j]->deref(xsink);
                 }
                 xsink->raiseException("GIT-MERGE-ERROR",
-                    "failed to allocate %zu bytes for resolved content", str->size());
+                    "failed to allocate %zu bytes for resolved content", slen);
                 return nullptr;
             }
-            memcpy(copy, str->c_str(), str->size());
-            BinaryNode* bin = new BinaryNode(copy, str->size());
+            if (slen) {
+                memcpy(copy, str->c_str(), slen);
+            }
+            BinaryNode* bin = new BinaryNode(copy, slen);
             resolutions.emplace(conflict_infos[i].path, bin);
         } else if (rv->getType() == NT_BINARY) {
             BinaryNode* bin = rv.release().get<BinaryNode>();

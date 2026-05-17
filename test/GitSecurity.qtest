@@ -1,0 +1,246 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  GitSecurity.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%requires git >= 1.0
+%requires GitForgeHelper
+%requires GitConnections
+%requires QUnit
+
+%exec-class GitSecurityTest
+
+#! Security regression tests for the issues found in the security audit
+public class GitSecurityTest inherits QUnit::Test {
+    private {
+        string m_tmpdir;
+    }
+
+    constructor() : Test("GitSecurityTest", "1.0") {
+        m_tmpdir = sprintf("%s/qore-git-sec-%d", ENV.TMPDIR ?? "/tmp", getpid());
+        mkdir(m_tmpdir, 0700);
+
+        addTestCase("H1: path traversal rejected (virtual)", \testPathTraversalVirtual());
+        addTestCase("H1: path traversal rejected (disk)", \testPathTraversalDisk());
+        addTestCase("H1: symlink write is not followed", \testSymlinkWriteBlocked());
+        addTestCase("H2: dangerous remote URL rejected", \testRemoteUrlValidation());
+        addTestCase("M1: createVirtual leaves no disk footprint", \testInMemoryNoDisk());
+        addTestCase("M1: addRemote migrates virtual repo to disk", \testMigrationOnAddRemote());
+        addTestCase("L2: zero-length blob round-trips", \testEmptyBlob());
+        addTestCase("H3: GitForgeHelper URL validation", \testForgeUrlValidation());
+        addTestCase("M3: gitlocal connection rejects ..", \testGitLocalTraversal());
+
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (m_tmpdir && is_dir(m_tmpdir)) {
+            system("rm -rf " + m_tmpdir);
+        }
+    }
+
+    private testPathTraversalVirtual() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        list<string> bad = (
+            "../escape.txt",
+            "../../etc/passwd",
+            "a/../../b",
+            "/abs/path",
+            "sub/../../../x",
+        );
+        foreach string p in (bad) {
+            assertThrows("GIT-PATH-ERROR", sub () { repo.writeFileString(p, "x"); },
+                NOTHING, sprintf("writeFileString rejects %y", p));
+            assertThrows("GIT-PATH-ERROR", sub () { repo.readFile(p); },
+                NOTHING, sprintf("readFile rejects %y", p));
+            assertThrows("GIT-PATH-ERROR", sub () { repo.deleteFile(p); },
+                NOTHING, sprintf("deleteFile rejects %y", p));
+            assertThrows("GIT-PATH-ERROR", sub () { repo.fileExists(p); },
+                NOTHING, sprintf("fileExists rejects %y", p));
+        }
+        # a legitimate nested path with a single dot component is still allowed
+        repo.writeFileString("a/b/c.txt", "ok\n");
+        assertEq("ok\n", repo.readFileString("a/b/c.txt"), "legitimate nested path works");
+    }
+
+    private testPathTraversalDisk() {
+        string rp = m_tmpdir + "/disk1";
+        Git::GitRepository repo = Git::GitRepository::init(rp);
+        # plant a sentinel file outside the working tree
+        string outside = m_tmpdir + "/SENTINEL";
+        File f();
+        f.open2(outside, O_CREAT | O_WRONLY | O_TRUNC);
+        f.write("original\n");
+        f.close();
+
+        assertThrows("GIT-PATH-ERROR", sub () {
+            repo.writeFileString("../SENTINEL", "PWNED\n");
+        }, NOTHING, "disk writeFileString rejects traversal");
+        assertThrows("GIT-PATH-ERROR", sub () {
+            repo.deleteFile("../SENTINEL");
+        }, NOTHING, "disk deleteFile rejects traversal");
+        assertThrows("GIT-PATH-ERROR", sub () {
+            repo.add("../../etc/x");
+        }, NOTHING, "add rejects traversal");
+
+        # the sentinel must be untouched
+        assertEq("original\n", ReadOnlyFile::readTextFile(outside),
+            "file outside the working tree was not modified");
+    }
+
+    private testSymlinkWriteBlocked() {
+        string rp = m_tmpdir + "/disk2";
+        Git::GitRepository repo = Git::GitRepository::init(rp);
+        string target = m_tmpdir + "/symlink-target";
+        File tf();
+        tf.open2(target, O_CREAT | O_WRONLY | O_TRUNC);
+        tf.write("safe\n");
+        tf.close();
+
+        # a relative symlink inside the working tree pointing at the external target
+        string wd = repo.workdir();
+        symlink(target, wd + "evil-link");
+
+        # writing through the symlink must fail (O_NOFOLLOW) and not corrupt the target
+        assertThrows("GIT-WRITE-ERROR", sub () {
+            repo.writeFileString("evil-link", "PWNED\n");
+        }, NOTHING, "writing through a symlink is refused");
+        assertEq("safe\n", ReadOnlyFile::readTextFile(target),
+            "symlink target was not overwritten");
+    }
+
+    private testRemoteUrlValidation() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        assertThrows("GIT-REMOTE-ERROR", sub () {
+            repo.addRemote("x", "ext::sh -c 'touch /tmp/pwned'");
+        }, NOTHING, "ext:: transport is rejected");
+        assertThrows("GIT-REMOTE-ERROR", sub () {
+            repo.addRemote("y", "");
+        }, NOTHING, "empty remote URL is rejected");
+    }
+
+    private testInMemoryNoDisk() {
+        string base = ENV.TMPDIR ?? "/tmp";
+        int before = glob(base + "/qore-git-virt-*").size();
+
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        assertTrue(repo.isVirtual(), "repo is virtual");
+        repo.configSet("user.name", "Sec Tester");
+        repo.configSet("user.email", "sec@test.com");
+        repo.writeFileString("secret.txt", "TOP-SECRET\n");
+        string oid = repo.commit("init");
+        assertEq(40, oid.size(), "commit produced a full OID");
+        assertEq("none", repo.state(), "in-memory repo state is none");
+        assertEq("Sec Tester", repo.configGet("user.name"), "in-memory config round-trips");
+        assertEq("TOP-SECRET\n", repo.readFileString("secret.txt"), "content readable");
+
+        int after = glob(base + "/qore-git-virt-*").size();
+        assertEq(before, after, "createVirtual created no temp directory on disk");
+    }
+
+    private testMigrationOnAddRemote() {
+        # set up a bare repo to act as a local remote
+        string bare = m_tmpdir + "/remote.git";
+        Git::GitRepository::init(bare, True);
+
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "Mig");
+        repo.configSet("user.email", "mig@test.com");
+        repo.writeFileString("file.txt", "hello\n");
+        repo.commit("init");
+
+        # adding a remote must transparently migrate the in-memory repo to disk
+        repo.addRemote("origin", bare);
+        repo.push("origin", "refs/heads/main:refs/heads/main");
+
+        # a second virtual repo can fetch what we pushed (proves migration worked)
+        Git::GitRepository repo2 = Git::GitRepository::createVirtual();
+        repo2.addRemote("origin", bare);
+        repo2.fetch();
+        list<string> rb = repo2.branches(True);
+        assertTrue(rb.size() > 0, "fetched remote branches after migration");
+        repo2.checkout(rb[0]);
+        assertEq("hello\n", repo2.readFileString("file.txt"),
+            "content survives migration + push + fetch");
+    }
+
+    private testEmptyBlob() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet("user.name", "E");
+        repo.configSet("user.email", "e@test.com");
+        repo.writeFileString("empty.txt", "");
+        repo.commit("empty file");
+        *string s = repo.readFileString("empty.txt");
+        assertEq("", s, "empty blob round-trips as empty string");
+        *binary b = repo.readFile("empty.txt");
+        assertEq(0, b.size(), "empty blob round-trips as zero-length binary");
+    }
+
+    private testForgeUrlValidation() {
+        # http without allow_insecure is refused (token would be cleartext)
+        assertThrows("GIT-FORGE-ERROR", sub () {
+            new GitForgeHelper::GitForgeHelper("gitlab", {
+                "owner": "o", "repo": "r", "token": "t",
+                "url": "http://gitlab.internal",
+            });
+        }, NOTHING, "cleartext http GitLab URL is refused");
+
+        # embedded credentials in the URL are refused
+        assertThrows("GIT-FORGE-ERROR", sub () {
+            new GitForgeHelper::GitForgeHelper("gitlab", {
+                "owner": "o", "repo": "r", "token": "t",
+                "url": "https://user:pass@gitlab.example.com",
+            });
+        }, NOTHING, "URL with embedded credentials is refused");
+
+        # non-http scheme is refused
+        assertThrows("GIT-FORGE-ERROR", sub () {
+            new GitForgeHelper::GitForgeHelper("gitlab", {
+                "owner": "o", "repo": "r", "token": "t",
+                "url": "file:///etc",
+            });
+        }, NOTHING, "non-http(s) scheme is refused");
+
+        # explicit opt-in allows http
+        GitForgeHelper::GitForgeHelper h1("gitlab", {
+            "owner": "o", "repo": "r", "token": "t",
+            "url": "http://gitlab.internal", "allow_insecure": True,
+        });
+        assertEq("gitlab", h1.getForgeType(), "http accepted with allow_insecure");
+
+        # default https URL is accepted
+        GitForgeHelper::GitForgeHelper h2("gitlab", {
+            "owner": "o", "repo": "r", "token": "t",
+        });
+        assertEq("gitlab", h2.getForgeType(), "default https URL accepted");
+    }
+
+    private testGitLocalTraversal() {
+        GitConnections::GitLocalConnection conn("c", "test",
+            "gitlocal:///some/../../etc");
+        assertThrows("GIT-CONNECTION-ERROR", sub () {
+            conn.get(True);
+        }, NOTHING, "gitlocal URL with .. is rejected");
+    }
+}

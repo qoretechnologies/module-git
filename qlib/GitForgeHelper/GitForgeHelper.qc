@@ -104,9 +104,13 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
         - \c owner: (required) repository owner/organization (GitHub) or project namespace (GitLab)
         - \c repo: (required) repository name
         - \c token: (required) API access token
-        - \c url: GitLab instance URL (default: "https://gitlab.com"); ignored for GitHub
+        - \c url: GitLab instance URL (default: "https://gitlab.com"); ignored for GitHub.
+          Must be an \c https URL with a host and no embedded credentials.
+        - \c allow_insecure: (optional) if @ref True, permit a cleartext \c http GitLab
+          URL (the API token would be sent unencrypted); default @ref False
 
-        @throw GIT-FORGE-ERROR unsupported forge type or missing required options
+        @throw GIT-FORGE-ERROR unsupported forge type, missing required options, or an
+        invalid/unsafe GitLab URL
     */
     constructor(string forge_type, hash<auto> opts) {
         # Validate required options
@@ -135,6 +139,9 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
             };
         } else if (forge_type == FORGE_GITLAB) {
             string url = opts.url ?? "https://gitlab.com";
+            # validate the instance URL before attaching the PRIVATE-TOKEN to it,
+            # to prevent token exfiltration / SSRF via an attacker-controlled URL
+            GitForgeHelper::validateForgeUrl(url, opts.allow_insecure ?? False);
             rest_config = {
                 "url": url + "/api/v4",
                 "headers": {
@@ -158,6 +165,75 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
         return rest;
     }
 
+    #! Validates a forge instance URL before credentials are attached to it
+    /** Rejects non-http(s) schemes, missing hosts, and URLs with embedded
+        credentials. Cleartext \c http is refused unless @a allow_insecure is
+        @ref True, since the API token would otherwise be sent unencrypted.
+
+        @param url the instance URL to validate
+        @param allow_insecure if @ref True, permit a cleartext \c http URL
+
+        @throw GIT-FORGE-ERROR the URL is malformed or unsafe
+    */
+    private static validateForgeUrl(string url, bool allow_insecure) {
+        hash<auto> u;
+        try {
+            u = parse_url(url);
+        } catch (hash<ExceptionInfo> ex) {
+            throw "GIT-FORGE-ERROR", sprintf("invalid forge URL %y: %s", url, ex.desc);
+        }
+        string scheme = exists u.protocol ? u.protocol.lwr() : "";
+        if (scheme != "http" && scheme != "https") {
+            throw "GIT-FORGE-ERROR", sprintf("forge URL %y uses unsupported scheme %y; only "
+                "\"https\" (or \"http\" with the allow_insecure option) is permitted",
+                url, scheme);
+        }
+        if (!u.host) {
+            throw "GIT-FORGE-ERROR", sprintf("forge URL %y has no host", url);
+        }
+        if (exists u.username || exists u.password) {
+            throw "GIT-FORGE-ERROR", "the forge URL must not contain embedded credentials "
+                "(user:password@host); pass the token via the \"token\" option instead";
+        }
+        if (scheme == "http" && !allow_insecure) {
+            throw "GIT-FORGE-ERROR", sprintf("refusing to send the API token over cleartext "
+                "HTTP to %y; use an https URL, or set the \"allow_insecure\" option to "
+                "override", url);
+        }
+    }
+
+    #! Performs a REST call, re-raising failures without credential-bearing context
+    /** The REST request carries the API token in its headers; on failure the
+        original exception's argument (which may include request/response context)
+        is dropped so the token cannot leak into logs or exception chains.
+
+        @param verb one of \c "GET", \c "POST", \c "PATCH", \c "PUT"
+        @param path the REST path
+        @param args optional request body
+
+        @return the REST response
+
+        @throw GIT-FORGE-ERROR the API call failed (sanitized)
+    */
+    private auto restCall(string verb, string path, *hash<auto> args) {
+        try {
+            switch (verb) {
+                case "GET": return getRestClient().restGet(path);
+                case "POST": return getRestClient().restPost(path, args);
+                case "PATCH": return getRestClient().restPatch(path, args);
+                case "PUT": return getRestClient().restPut(path, args);
+                default: throw "GIT-FORGE-ERROR", sprintf("internal error: invalid REST "
+                    "verb %y", verb);
+            }
+        } catch (hash<ExceptionInfo> ex) {
+            if (ex.err == "GIT-FORGE-ERROR") {
+                rethrow;
+            }
+            throw "GIT-FORGE-ERROR", sprintf("%s %s failed: %s: %s", verb, path, ex.err,
+                ex.desc);
+        }
+    }
+
     #! Creates a pull request (GitHub) or merge request (GitLab)
     /** @param head the source branch
         @param base the target branch
@@ -173,7 +249,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
     */
     hash<auto> createPullRequest(string head, string base, string title, *string body) {
         if (forge_type == FORGE_GITHUB) {
-            hash<auto> resp = getRestClient().restPost(
+            hash<auto> resp = restCall("POST",
                 sprintf("/repos/%s/%s/pulls", owner, repo_name),
                 {
                     "title": title,
@@ -189,7 +265,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
             };
         } else {
             int pid = getGitLabProjectId();
-            hash<auto> resp = getRestClient().restPost(
+            hash<auto> resp = restCall("POST",
                 sprintf("/projects/%d/merge_requests", pid),
                 {
                     "title": title,
@@ -215,7 +291,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
     */
     list<hash<auto>> listPullRequests(string state = "open") {
         if (forge_type == FORGE_GITHUB) {
-            list<auto> resp = getRestClient().restGet(
+            list<auto> resp = restCall("GET",
                 sprintf("/repos/%s/%s/pulls?state=%s", owner, repo_name,
                     Qore::encode_url(state, True)),
             ).body;
@@ -234,7 +310,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
         } else {
             int pid = getGitLabProjectId();
             string gl_state = state == "open" ? "opened" : state;
-            list<auto> resp = getRestClient().restGet(
+            list<auto> resp = restCall("GET",
                 sprintf("/projects/%d/merge_requests?state=%s", pid,
                     Qore::encode_url(gl_state, True)),
             ).body;
@@ -262,7 +338,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
     */
     hash<auto> getPullRequest(int pr_id) {
         if (forge_type == FORGE_GITHUB) {
-            hash<auto> resp = getRestClient().restGet(
+            hash<auto> resp = restCall("GET",
                 sprintf("/repos/%s/%s/pulls/%d", owner, repo_name, pr_id),
             ).body;
             return {
@@ -277,7 +353,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
             };
         } else {
             int pid = getGitLabProjectId();
-            hash<auto> resp = getRestClient().restGet(
+            hash<auto> resp = restCall("GET",
                 sprintf("/projects/%d/merge_requests/%d", pid, pr_id),
             ).body;
             return {
@@ -300,13 +376,13 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
     */
     closePullRequest(int pr_id) {
         if (forge_type == FORGE_GITHUB) {
-            getRestClient().restPatch(
+            restCall("PATCH",
                 sprintf("/repos/%s/%s/pulls/%d", owner, repo_name, pr_id),
                 {"state": "closed"},
             );
         } else {
             int pid = getGitLabProjectId();
-            getRestClient().restPut(
+            restCall("PUT",
                 sprintf("/projects/%d/merge_requests/%d", pid, pr_id),
                 {"state_event": "close"},
             );
@@ -335,7 +411,7 @@ GitForgeHelper helper("github", "myorg", "myrepo", rest);
             return gitlab_project_id;
         }
         string path = owner + "/" + repo_name;
-        hash<auto> resp = getRestClient().restGet(
+        hash<auto> resp = restCall("GET",
             sprintf("/projects/%s", Qore::encode_url(path, True)),
         ).body;
         gitlab_project_id = int(resp.id);

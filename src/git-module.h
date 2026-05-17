@@ -52,4 +52,14 @@ DLLLOCAL int git_raise_exception(ExceptionSink* xsink, const char* err, const ch
 //! Raises a Qore exception from a specific libgit2 error code
 DLLLOCAL int git_raise_exception(ExceptionSink* xsink, const char* err, int rc, const char* context);
 
+//! Registers a temporary directory created for a virtual repo so it can be
+//! reclaimed at module unload even if the owning object leaks
+DLLLOCAL void qore_git_register_tempdir(const std::string& path);
+
+//! Removes a temporary directory from the cleanup registry (after it is deleted)
+DLLLOCAL void qore_git_unregister_tempdir(const std::string& path);
+
+//! Removes any temp directories still registered (called at module unload)
+DLLLOCAL void qore_git_cleanup_all_tempdirs();
+
 #endif // _QORE_GIT_MODULE_H

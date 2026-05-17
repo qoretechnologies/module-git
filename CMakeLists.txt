@@ -64,6 +64,8 @@ set(QPP_SRC
 set(CPP_SRC
     src/git-module.cpp
     src/QoreGitRepository.cpp
+    src/QoreGitMemoryODB.cpp
+    src/QoreGitMemoryRefDB.cpp
 )
 
 qore_wrap_qpp_value(QPP_SOURCES DOXLIST _dox_src METALIST QPP_META_SRC ${QPP_SRC})

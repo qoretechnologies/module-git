@@ -200,9 +200,13 @@ printf("HEAD: %s\n", repo.headCommitId());
 
     - <b>Disk-backed mode</b>: Traditional git repository on the local filesystem.
       Created with the constructor or @ref init().
-    - <b>Virtual/in-memory mode</b>: Git repository with no filesystem dependency.
-      Created with @ref createVirtual(). All objects live in memory. Ideal for
-      applications like Qorus that store configuration in a database.
+    - <b>Virtual/in-memory mode</b>: Git repository created with @ref createVirtual().
+      The object database, reference database, config, and index live entirely in
+      memory with no filesystem footprint. Ideal for applications like Qorus that
+      store configuration in a database. If a remote is added (for @ref fetch() /
+      @ref push()), the repository is transparently migrated to a private
+      temporary on-disk repository, since libgit2's pack negotiation requires
+      disk-backed object storage.
 
     Both modes share the virtual filesystem API (@ref writeFile(), @ref readFile(),
     @ref deleteFile(), @ref listFiles()) for manipulating file content.
@@ -254,7 +258,13 @@ static GitRepository GitRepository::init(string path, *bool bare) [dom=FILESYSTE
 }
 
 //! Creates an in-memory virtual repository with no filesystem dependency
-/** @par Example:
+/** The object database, reference database, config, and index are held entirely
+    in memory; nothing is written to disk. (If a remote is subsequently added,
+    the repository is transparently migrated to a private temporary on-disk
+    repository — see @ref connectRemote() and @ref addRemote() — because
+    libgit2's fetch/push pack negotiation requires disk-backed object storage.)
+
+    @par Example:
     @code{.py}
 GitRepository repo = GitRepository::createVirtual();
 repo.configSet("user.name", "Qorus");
@@ -1025,6 +1035,12 @@ list<hash<StashInfo>> GitRepository::stashList() [dom=FILESYSTEM] {
 //! Creates a virtual repository connected to a remote
 /** Convenience factory that creates a virtual repo, configures identity,
     adds the remote, fetches, and optionally checks out a branch.
+
+    @note Because a remote is added, the repository is backed by a private
+    temporary on-disk repository (created with mode 0700, honoring @c TMPDIR,
+    and removed when the object is destroyed). libgit2's fetch/push pack
+    negotiation requires disk-backed object storage; use @ref createVirtual()
+    without a remote for a strictly in-memory repository.
 
     @par Example:
     @code{.py}

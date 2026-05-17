@@ -82,10 +82,20 @@ public class GitLocalConnection inherits AbstractConnectionWithInfo {
     }
 
     #! Returns a GitRepository for this connection
+    /** @note A \c gitlocal:// connection grants access to a git repository on the
+        host filesystem, with the same privileges as the running process; restrict
+        who may define such connections accordingly. A \c ".." path component in
+        the URL is rejected to prevent traversal tricks.
+    */
     private Git::GitRepository getImpl(bool connect = True, *hash<auto> rtopts) {
         # Parse the path from the URL
         string path = url;
         path =~ s/^gitlocal:\/\///;
+        # reject path-traversal trickery in the connection URL
+        if (path =~ /(^|\/)\.\.(\/|$)/) {
+            throw "GIT-CONNECTION-ERROR", sprintf("gitlocal connection URL %y contains a "
+                "\"..\" path component, which is not permitted", url);
+        }
         return new Git::GitRepository("/" + path);
     }
 

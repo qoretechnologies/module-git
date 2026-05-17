@@ -59,4 +59,31 @@
       sync/publish, environment branches, change proposals, and observer-based change detection
     - @ref gitforgehelperintro "GitForgeHelper": GitHub/GitLab PR/MR management
     - @ref gitconnectionsintro "GitConnections": connection provider for disk and virtual repos
+
+    <b>Security and Robustness</b>
+    - virtual repositories created with @ref Git::GitRepository::createVirtual()
+      "createVirtual()" are now genuinely in-memory (in-memory object database,
+      reference database, config, and index) with <i>no</i> filesystem footprint;
+      a disk-backed temporary repository is created transparently only if a remote
+      is added (required for fetch/push pack negotiation)
+    - temporary directories created for remote-backed virtual repositories honor
+      @c TMPDIR, are created with mode 0700, and are tracked so they are reclaimed
+      at module unload even if the owning object is leaked
+    - file path arguments to @ref Git::GitRepository::readFile() "readFile()",
+      @ref Git::GitRepository::writeFile() "writeFile()",
+      @ref Git::GitRepository::deleteFile() "deleteFile()", etc. are validated to
+      reject absolute paths and \c ".." traversal outside the working tree; disk
+      writes use @c O_NOFOLLOW so a symlink in the working tree cannot be used to
+      overwrite an external file (throws \c GIT-PATH-ERROR)
+    - remote URLs are validated; the \c "ext::" smart-transport scheme (arbitrary
+      command execution) is rejected (throws \c GIT-REMOTE-ERROR)
+    - @ref Git::GitRepository::fetch() "fetch()" and
+      @ref Git::GitRepository::push() "push()" hold the repository lock for the
+      duration of network I/O, preventing concurrent access to the underlying
+      libgit2 repository from other threads
+    - GitForgeHelper validates the GitLab instance URL (scheme, host, no embedded
+      credentials; cleartext \c http requires an explicit \c allow_insecure
+      option) before attaching the API token, and re-raises REST failures without
+      credential-bearing request context
+    - GitConnections rejects \c ".." path components in \c gitlocal:// URLs
 */
