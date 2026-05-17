@@ -27,7 +27,7 @@
 
 #include "QoreGitMemoryRefDB.h"
 
-#include <git2/sys/errors.h>
+#include <git2/errors.h>
 
 #include <cstring>
 #include <fnmatch.h>

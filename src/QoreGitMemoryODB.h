@@ -28,8 +28,8 @@
 #ifndef _QORE_GIT_MEMORY_ODB_H
 #define _QORE_GIT_MEMORY_ODB_H
 
-#include <qore/Qore.h>
-#include <git2.h>
+#include "git-module.h"
+
 #include <git2/sys/odb_backend.h>
 
 #include <map>
