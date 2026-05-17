@@ -2612,6 +2612,35 @@ QoreStringNode* QoreGitRepository::stash(const char* message, ExceptionSink* xsi
         return nullptr;
     }
 
+    // libgit2 < 1.6 (e.g. 1.5.x) has a racy-git defect in git_stash_save():
+    // it builds the stashed working-tree commit from an index-vs-workdir
+    // diff that takes a stat fast-path.  If a tracked file is modified
+    // within the same filesystem mtime tick as the preceding index write
+    // and the new content has the same byte size, the change is not
+    // detected, so the stash silently records the OLD blob -- the user's
+    // modifications are lost at stash time and cannot be recovered by pop
+    // (see libgit2 PR #4668).  Defeat this deterministically (no
+    // waiting/polling): force libgit2 to re-validate racily-clean entries
+    // by content and refresh the index stat cache with a
+    // GIT_DIFF_UPDATE_INDEX diff, then persist the index, so
+    // git_stash_save()'s internal diff observes the true working-tree
+    // state.  This only refreshes stat metadata; blob ids are unchanged,
+    // so it cannot alter what is stashed.
+    {
+        git_index* index = nullptr;
+        if (git_repository_index(&index, m_repo) == 0) {
+            git_diff* diff = nullptr;
+            git_diff_options diff_opts;
+            git_diff_options_init(&diff_opts, GIT_DIFF_OPTIONS_VERSION);
+            diff_opts.flags |= GIT_DIFF_UPDATE_INDEX;
+            if (git_diff_index_to_workdir(&diff, m_repo, index, &diff_opts) == 0) {
+                git_diff_free(diff);
+            }
+            git_index_write(index);
+            git_index_free(index);
+        }
+    }
+
     git_oid stash_oid;
     rc = git_stash_save(&stash_oid, m_repo, sig, message, GIT_STASH_DEFAULT);
     git_signature_free(sig);
