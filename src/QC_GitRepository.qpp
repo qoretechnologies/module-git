@@ -225,7 +225,7 @@ GitRepository repo("/path/to/repo");
 
     @throw GIT-REPOSITORY-OPEN-ERROR failed to open repository
 */
-GitRepository::constructor(string path) {
+GitRepository::constructor(string path) [flags=NAMED_ARGS] {
     ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(path->c_str(), xsink), xsink);
     if (*xsink) {
         return;
@@ -246,7 +246,7 @@ GitRepository repo = GitRepository::init("/path/to/new/repo");
 
     @throw GIT-REPOSITORY-INIT-ERROR failed to initialize repository
 */
-static GitRepository GitRepository::init(string path, *bool bare) [dom=FILESYSTEM] {
+static GitRepository GitRepository::init(string path, *bool bare) [dom=FILESYSTEM;flags=NAMED_ARGS] {
     ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(path->c_str(), bare, xsink), xsink);
     if (*xsink) {
         return QoreValue();
@@ -315,7 +315,7 @@ bool GitRepository::isVirtual() [flags=CONSTANT] {
     @throw GIT-READ-ERROR failed to read file
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-*binary GitRepository::readFile(string path) {
+*binary GitRepository::readFile(string path) [flags=NAMED_ARGS] {
     return repo->readFile(path->c_str(), xsink);
 }
 
@@ -333,7 +333,7 @@ bool GitRepository::isVirtual() [flags=CONSTANT] {
     @throw GIT-READ-ERROR failed to read file
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-*string GitRepository::readFileString(string path, *string encoding) {
+*string GitRepository::readFileString(string path, *string encoding) [flags=NAMED_ARGS] {
     return repo->readFileString(path->c_str(), encoding ? encoding->c_str() : nullptr, xsink);
 }
 
@@ -352,7 +352,7 @@ repo.writeFile("data/image.png", binary_data);
     @throw GIT-WRITE-ERROR failed to write file
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::writeFile(string path, binary content) {
+nothing GitRepository::writeFile(string path, binary content) [flags=NAMED_ARGS] {
     repo->writeFile(path->c_str(), content->getPtr(), content->size(), xsink);
 }
 
@@ -371,7 +371,7 @@ repo.writeFileString("config/db.yaml", "pool_size: 10\n");
     @throw GIT-WRITE-ERROR failed to write file
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::writeFileString(string path, string content) {
+nothing GitRepository::writeFileString(string path, string content) [flags=NAMED_ARGS] {
     repo->writeFileString(path->c_str(), content->c_str(), content->size(), xsink);
 }
 
@@ -388,7 +388,7 @@ repo.deleteFile("config/old.yaml");
 
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::deleteFile(string path) {
+nothing GitRepository::deleteFile(string path) [flags=NAMED_ARGS] {
     repo->deleteFile(path->c_str(), xsink);
 }
 
@@ -406,7 +406,7 @@ if (repo.fileExists("config/db.yaml")) {
 
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-bool GitRepository::fileExists(string path) {
+bool GitRepository::fileExists(string path) [flags=NAMED_ARGS] {
     return repo->fileExists(path->c_str(), xsink);
 }
 
@@ -491,7 +491,7 @@ repo.add("file.txt");
     @throw GIT-INDEX-ERROR failed to add file to index
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::add(string path) {
+nothing GitRepository::add(string path) [flags=NAMED_ARGS] {
     repo->addToIndex(path->c_str(), xsink);
 }
 
@@ -507,7 +507,7 @@ repo.unstage("file.txt");
     @throw GIT-REPOSITORY-ERROR repository has been closed
     @throw GIT-MODE-ERROR if called on a virtual repository
 */
-nothing GitRepository::unstage(string path) {
+nothing GitRepository::unstage(string path) [flags=NAMED_ARGS] {
     repo->removeFromIndex(path->c_str(), xsink);
 }
 
@@ -527,7 +527,7 @@ string oid = repo.commit("Initial commit");
     @note Requires user.name and user.email to be configured in git config.
     Use @ref configSet() to configure them.
 */
-string GitRepository::commit(string message) {
+string GitRepository::commit(string message) [flags=NAMED_ARGS] {
     return repo->commit(message->c_str(), xsink);
 }
 
@@ -578,7 +578,7 @@ repo.configSet("user.email", "john@example.com");
     @throw GIT-CONFIG-ERROR failed to set config value
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::configSet(string key, string value) {
+nothing GitRepository::configSet(string key, string value) [flags=NAMED_ARGS] {
     repo->configSet(key->c_str(), value->c_str(), xsink);
 }
 
@@ -595,7 +595,7 @@ nothing GitRepository::configSet(string key, string value) {
     @throw GIT-CONFIG-ERROR failed to get config value
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-*string GitRepository::configGet(string key) {
+*string GitRepository::configGet(string key) [flags=NAMED_ARGS] {
     return repo->configGet(key->c_str(), xsink);
 }
 
@@ -614,7 +614,7 @@ repo.createBranch("bugfix", "v1.0");  # branch from tag
     @throw GIT-BRANCH-ERROR failed to create branch
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::createBranch(string name, *string from_ref) {
+nothing GitRepository::createBranch(string name, *string from_ref) [flags=NAMED_ARGS] {
     repo->createBranch(name->c_str(), from_ref ? from_ref->c_str() : nullptr, xsink);
 }
 
@@ -629,7 +629,7 @@ repo.deleteBranch("feature-x");
     @throw GIT-BRANCH-ERROR failed to delete branch (e.g., branch not found or is current)
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::deleteBranch(string name) {
+nothing GitRepository::deleteBranch(string name) [flags=NAMED_ARGS] {
     repo->deleteBranch(name->c_str(), xsink);
 }
 
@@ -648,7 +648,7 @@ repo.checkout("feature-x");
     @throw GIT-CHECKOUT-ERROR failed to checkout
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::checkout(string ref) {
+nothing GitRepository::checkout(string ref) [flags=NAMED_ARGS] {
     repo->checkout(ref->c_str(), xsink);
 }
 
@@ -666,7 +666,7 @@ list<string> remote = repo.branches(True);
     @throw GIT-BRANCH-ERROR failed to list branches
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-list<string> GitRepository::branches(*bool remote) {
+list<string> GitRepository::branches(*bool remote) [flags=NAMED_ARGS] {
     return repo->listBranches(remote, xsink);
 }
 
@@ -704,7 +704,7 @@ repo.createTag("v0.8", "Old release", "abc123");  # tag specific commit
     @throw GIT-TAG-ERROR failed to create tag
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::createTag(string name, *string message, *string target_ref) {
+nothing GitRepository::createTag(string name, *string message, *string target_ref) [flags=NAMED_ARGS] {
     repo->createTag(name->c_str(),
                     message ? message->c_str() : nullptr,
                     target_ref ? target_ref->c_str() : nullptr, xsink);
@@ -721,7 +721,7 @@ repo.deleteTag("v1.0");
     @throw GIT-TAG-ERROR failed to delete tag
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::deleteTag(string name) {
+nothing GitRepository::deleteTag(string name) [flags=NAMED_ARGS] {
     repo->deleteTag(name->c_str(), xsink);
 }
 
@@ -764,7 +764,7 @@ for (hash<auto> entry in (changes)) {
     @throw GIT-DIFF-ERROR failed to compute diff
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-list<hash<DiffEntry>> GitRepository::diff(*string from_ref, *string to_ref) {
+list<hash<DiffEntry>> GitRepository::diff(*string from_ref, *string to_ref) [flags=NAMED_ARGS] {
     return repo->diff(from_ref ? from_ref->c_str() : nullptr,
                       to_ref ? to_ref->c_str() : nullptr, xsink);
 }
@@ -784,7 +784,7 @@ printf("%s\n", patch);
     @throw GIT-DIFF-ERROR failed to compute diff
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-string GitRepository::diffPatch(*string from_ref, *string to_ref) {
+string GitRepository::diffPatch(*string from_ref, *string to_ref) [flags=NAMED_ARGS] {
     return repo->diffPatch(from_ref ? from_ref->c_str() : nullptr,
                            to_ref ? to_ref->c_str() : nullptr, xsink);
 }
@@ -811,7 +811,7 @@ list<hash<auto>> file_log = repo.log(NOTHING, "config/db.yaml");
     @throw GIT-LOG-ERROR failed to traverse log
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-list<hash<CommitInfo>> GitRepository::log(*int max_count, *string path) {
+list<hash<CommitInfo>> GitRepository::log(*int max_count, *string path) [flags=NAMED_ARGS] {
     return repo->log((int)max_count,
                      path ? path->c_str() : nullptr, xsink);
 }
@@ -830,7 +830,7 @@ repo.addRemote("origin", "git@github.com:myorg/myrepo.git");
     @throw GIT-REMOTE-ERROR failed to add remote
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::addRemote(string name, string url) [dom=NETWORK] {
+nothing GitRepository::addRemote(string name, string url) [dom=NETWORK;flags=NAMED_ARGS] {
     repo->addRemote(name->c_str(), url->c_str(), xsink);
 }
 
@@ -845,7 +845,7 @@ repo.removeRemote("origin");
     @throw GIT-REMOTE-ERROR failed to remove remote
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
-nothing GitRepository::removeRemote(string name) {
+nothing GitRepository::removeRemote(string name) [flags=NAMED_ARGS] {
     repo->removeRemote(name->c_str(), xsink);
 }
 
@@ -872,7 +872,7 @@ repo.fetch("upstream");      # fetch from named remote
     covered. Coarse all-or-nothing control is always enforced via the
     @c NETWORK functional domain.
 */
-nothing GitRepository::fetch(*string remote) [dom=NETWORK] {
+nothing GitRepository::fetch(*string remote) [dom=NETWORK;flags=NAMED_ARGS] {
     repo->fetch(remote ? remote->c_str() : nullptr, xsink);
 }
 
@@ -894,7 +894,7 @@ repo.push("origin", "refs/heads/main:refs/heads/main");  # explicit refspec
     @note See @ref GitRepository::fetch() "fetch()" for details on the
     best-effort network sandbox pre-flight check.
 */
-nothing GitRepository::push(*string remote, *string refspec) [dom=NETWORK] {
+nothing GitRepository::push(*string remote, *string refspec) [dom=NETWORK;flags=NAMED_ARGS] {
     repo->push(remote ? remote->c_str() : nullptr,
                refspec ? refspec->c_str() : nullptr, xsink);
 }
@@ -917,7 +917,7 @@ printf("commit %s by %s: %s\n", info.short_id, info.author.name, info.summary);
 
     @since git 1.0
 */
-hash<CommitInfo> GitRepository::lookupCommit(string ref) [flags=RET_VALUE_ONLY] {
+hash<CommitInfo> GitRepository::lookupCommit(string ref) [flags=RET_VALUE_ONLY,NAMED_ARGS] {
     return repo->lookupCommit(ref->c_str(), xsink);
 }
 
@@ -960,7 +960,7 @@ printf("Changed: %d files, +%d -%d\n", stats.files_changed, stats.insertions, st
 
     @since git 1.0
 */
-hash<DiffStatsInfo> GitRepository::diffStats(*string from_ref, *string to_ref) {
+hash<DiffStatsInfo> GitRepository::diffStats(*string from_ref, *string to_ref) [flags=NAMED_ARGS] {
     return repo->diffStats(from_ref ? from_ref->c_str() : nullptr,
                            to_ref ? to_ref->c_str() : nullptr, xsink);
 }
@@ -976,7 +976,7 @@ for (hash<BlameHunkInfo> h in (hunks)) {
     @endcode
 
     @param path the file path to blame
-    @param opts optional options:
+    @param options optional options:
     - \c newest_commit (string): only consider commits up to this ref
     - \c oldest_commit (string): only consider commits from this ref
 
@@ -987,8 +987,8 @@ for (hash<BlameHunkInfo> h in (hunks)) {
 
     @since git 1.0
 */
-list<hash<BlameHunkInfo>> GitRepository::blame(string path, *hash<auto> opts) {
-    return repo->blame(path->c_str(), opts, xsink);
+list<hash<BlameHunkInfo>> GitRepository::blame(string path, *hash<auto> options) [flags=NAMED_ARGS] {
+    return repo->blame(path->c_str(), options, xsink);
 }
 
 //! Saves the current working directory state to the stash (disk mode only)
@@ -1007,7 +1007,7 @@ string oid = repo.stash("Work in progress");
 
     @since git 1.0
 */
-string GitRepository::stash(*string message) [dom=FILESYSTEM] {
+string GitRepository::stash(*string message) [dom=FILESYSTEM;flags=NAMED_ARGS] {
     return repo->stash(message ? message->c_str() : nullptr, xsink);
 }
 
@@ -1068,7 +1068,7 @@ GitRepository repo = GitRepository::connectRemote("git@github.com:org/repo.git",
     @endcode
 
     @param url the remote URL
-    @param opts optional configuration:
+    @param options optional configuration:
     - \c identity (hash): \c name and \c email for commits
     - \c branch (string): branch to checkout after fetch
 
@@ -1084,7 +1084,7 @@ GitRepository repo = GitRepository::connectRemote("git@github.com:org/repo.git",
 
     @since git 1.0
 */
-static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) [dom=NETWORK] {
+static GitRepository GitRepository::connectRemote(string url, *hash<auto> options) [dom=NETWORK;flags=NAMED_ARGS] {
     // Create virtual repo
     ReferenceHolder<QoreGitRepository> repo(new QoreGitRepository(true, xsink), xsink);
     if (*xsink) {
@@ -1092,8 +1092,8 @@ static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) 
     }
 
     // Configure identity if provided
-    if (opts) {
-        QoreValue id = opts->getKeyValue("identity");
+    if (options) {
+        QoreValue id = options->getKeyValue("identity");
         if (id.getType() == NT_HASH) {
             const QoreHashNode* identity = id.get<const QoreHashNode>();
             QoreValue name_val = identity->getKeyValue("name");
@@ -1129,8 +1129,8 @@ static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) 
 
     // Checkout branch if specified, otherwise auto-detect
     bool has_branch = false;
-    if (opts) {
-        QoreValue bv = opts->getKeyValue("branch");
+    if (options) {
+        QoreValue bv = options->getKeyValue("branch");
         if (bv.getType() == NT_STRING) {
             QoreStringValueHelper branch(bv);
             repo->checkout(branch->c_str(), xsink);
@@ -1167,7 +1167,7 @@ static GitRepository GitRepository::connectRemote(string url, *hash<auto> opts) 
 
 //! Merges the specified ref into the current branch
 /** Performs a git merge of the specified reference into the current HEAD.
-    Supports multiple conflict resolution strategies via the \c opts hash:
+    Supports multiple conflict resolution strategies via the \c options hash:
     - \c strategy (string): \c "detect" (default), \c "ours", \c "theirs", or \c "callback"
     - \c resolver (code): conflict resolver callback (required for \c "callback" strategy);
       receives a @ref hash<GitMergeConflict>, returns resolved content (string/binary) or @ref nothing
@@ -1197,7 +1197,7 @@ hash<GitMergeResult> result = repo.merge("feature", {
     @endcode
 
     @param ref the branch, tag, or commit SHA to merge
-    @param opts optional merge options hash
+    @param options optional merge options hash
 
     @return a @ref hash<GitMergeResult> with the merge outcome
 
@@ -1207,8 +1207,8 @@ hash<GitMergeResult> result = repo.merge("feature", {
 
     @since git 1.0
 */
-hash<GitMergeResult> GitRepository::merge(string ref, *hash<auto> opts) [dom=FILESYSTEM] {
-    return repo->merge(ref->c_str(), opts, xsink);
+hash<GitMergeResult> GitRepository::merge(string ref, *hash<auto> options) [dom=FILESYSTEM;flags=NAMED_ARGS] {
+    return repo->merge(ref->c_str(), options, xsink);
 }
 
 //! Fetches from a remote and merges the tracking branch into the current branch
@@ -1227,7 +1227,7 @@ hash<GitMergeResult> result = repo.pull("origin", {
     @endcode
 
     @param remote the remote name (default: "origin")
-    @param opts optional merge options hash (same keys as @ref merge())
+    @param options optional merge options hash (same keys as @ref merge())
 
     @return a @ref hash<GitMergeResult> with the merge outcome
 
@@ -1241,6 +1241,6 @@ hash<GitMergeResult> result = repo.pull("origin", {
 
     @since git 1.0
 */
-hash<GitMergeResult> GitRepository::pull(*string remote, *hash<auto> opts) [dom=NETWORK] {
-    return repo->pull(remote ? remote->c_str() : nullptr, opts, xsink);
+hash<GitMergeResult> GitRepository::pull(*string remote, *hash<auto> options) [dom=NETWORK;flags=NAMED_ARGS] {
+    return repo->pull(remote ? remote->c_str() : nullptr, options, xsink);
 }
