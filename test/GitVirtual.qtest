@@ -40,6 +40,8 @@ public class GitVirtualTest inherits QUnit::Test {
         addTestCase("nested directory structure", \testNestedDirectories());
         addTestCase("binary file round-trip", \testBinaryRoundTrip());
         addTestCase("disk mode add() rejected in virtual", \testModeErrors());
+        addTestCase("named argument calls", \testNamedArguments());
+        addTestCase("named argument surface parses", \testNamedArgumentSurfaceParses());
         set_return_value(main());
     }
 
@@ -191,5 +193,95 @@ public class GitVirtualTest inherits QUnit::Test {
         # unstage() should fail in virtual mode
         assertThrows("GIT-MODE-ERROR", \repo.unstage(), ("test.txt",),
             "unstage() throws GIT-MODE-ERROR in virtual mode");
+    }
+
+    private testNamedArguments() {
+        Git::GitRepository repo = Git::GitRepository::createVirtual();
+        repo.configSet(key: "user.name", value: "Named User");
+        repo.configSet(key: "user.email", value: "named@test.com");
+        assertEq("Named User", repo.configGet(key: "user.name"), "configGet() accepts named arguments");
+
+        repo.writeFileString(path: "config/db.yaml", content: "pool_size: 10\n");
+        assertEq("pool_size: 10\n", repo.readFileString(path: "config/db.yaml", encoding: NOTHING),
+            "readFileString() accepts named arguments");
+
+        binary data = <01020304>;
+        repo.writeFile(path: "data.bin", content: data);
+        assertEq(data, repo.readFile(path: "data.bin"), "binary file calls accept named arguments");
+        assertTrue(repo.fileExists(path: "data.bin"), "fileExists() accepts named arguments");
+
+        string first = repo.commit(message: "Initial named commit");
+        assertEq(first, repo.lookupCommit(ref: first).id, "lookupCommit() accepts named arguments");
+
+        repo.writeFileString(path: "config/db.yaml", content: "pool_size: 12\n");
+        string second = repo.commit(message: "Update named commit");
+
+        list<hash<auto>> changes = repo.diff(from_ref: first, to_ref: second);
+        assertEq(1, changes.size(), "diff() accepts named arguments");
+
+        string patch = repo.diffPatch(from_ref: first, to_ref: second);
+        assertTrue(patch.find("+pool_size: 12") >= 0, "diffPatch() accepts named arguments");
+
+        list<hash<auto>> commits = repo.log(max_count: 2, path: NOTHING);
+        assertEq(2, commits.size(), "log() accepts named arguments");
+
+        hash<auto> stats = repo.diffStats(from_ref: first, to_ref: second);
+        assertEq(1, stats.files_changed, "diffStats() accepts named arguments");
+
+        repo.createBranch(name: "named-branch", from_ref: second);
+        assertTrue(repo.branches(remote: False).contains("named-branch"), "branch calls accept named arguments");
+
+        repo.createTag(name: "named-tag", message: NOTHING, target_ref: second);
+        assertTrue(repo.tags().contains("named-tag"), "createTag() accepts named arguments");
+        repo.deleteTag(name: "named-tag");
+
+        repo.writeFileString(path: "scratch.txt", content: "temporary\n");
+        assertTrue(repo.fileExists(path: "scratch.txt"), "scratch file exists before named delete");
+        repo.deleteFile(path: "scratch.txt");
+        assertEq(False, repo.fileExists(path: "scratch.txt"), "deleteFile() accepts named arguments");
+    }
+
+    private testNamedArgumentSurfaceParses() {
+        Program p(PO_NEW_STYLE);
+        p.loadModule("git");
+        p.parse("
+sub named_git_repository_calls() {
+    Git::GitRepository repo = Git::GitRepository::createVirtual();
+    Git::GitRepository disk_repo(path: '/tmp/qore-module-git-named');
+    Git::GitRepository initialized = Git::GitRepository::init(path: '/tmp/qore-module-git-init', bare: False);
+
+    repo.writeFileString(path: 'file.txt', content: 'content');
+    repo.writeFile(path: 'file.bin', content: <0102>);
+    *string text = repo.readFileString(path: 'file.txt', encoding: NOTHING);
+    *binary bytes = repo.readFile(path: 'file.bin');
+    bool has_file = repo.fileExists(path: 'file.txt');
+    repo.add(path: 'file.txt');
+    repo.unstage(path: 'file.txt');
+    string oid = repo.commit(message: 'commit');
+    repo.configSet(key: 'user.name', value: 'User');
+    *string cfg = repo.configGet(key: 'user.name');
+    repo.createBranch(name: 'feature', from_ref: oid);
+    repo.deleteBranch(name: 'feature');
+    repo.checkout(ref: 'main');
+    list<string> branch_names = repo.branches(remote: False);
+    repo.createTag(name: 'v1.0', message: NOTHING, target_ref: oid);
+    repo.deleteTag(name: 'v1.0');
+    list<hash<auto>> changes = repo.diff(from_ref: NOTHING, to_ref: oid);
+    string patch = repo.diffPatch(from_ref: NOTHING, to_ref: oid);
+    list<hash<auto>> entries = repo.log(max_count: 10, path: NOTHING);
+    repo.addRemote(name: 'origin', url: 'https://example.invalid/repo.git');
+    repo.removeRemote(name: 'origin');
+    repo.fetch(remote: 'origin');
+    repo.push(remote: 'origin', refspec: 'refs/heads/main:refs/heads/main');
+    hash<auto> commit_info = repo.lookupCommit(ref: oid);
+    hash<auto> diff_stats = repo.diffStats(from_ref: NOTHING, to_ref: oid);
+    list<hash<auto>> blame_hunks = repo.blame(path: 'file.txt', options: NOTHING);
+    string stash_oid = repo.stash(message: 'work in progress');
+    Git::GitRepository remote_repo = Git::GitRepository::connectRemote(url: 'https://example.invalid/repo.git',
+        options: NOTHING);
+    hash<auto> merge_result = repo.merge(ref: 'main', options: NOTHING);
+    hash<auto> pull_result = repo.pull(remote: 'origin', options: NOTHING);
+}
+", "git-named-arguments");
     }
 }
