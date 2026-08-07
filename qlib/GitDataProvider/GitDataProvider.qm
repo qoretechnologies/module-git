@@ -41,6 +41,7 @@ module GitDataProvider {
         # Register the Git app
         DataProviderActionCatalog::registerApp(<DataProviderAppInfo>{
             "name": AppName,
+            "presentation_source_locale": "en",
             "display_name": "Git",
             "short_desc": "Git repository operations",
             "desc": "Provides integration with Git repositories for managing files, commits, "

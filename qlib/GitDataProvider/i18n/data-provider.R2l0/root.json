@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "root": {
+      "messages": {
+        "app.R2l0.display_name": {
+          "source": "Git",
+          "message": "Git"
+        },
+        "app.R2l0.short_desc": {
+          "source": "Git repository operations",
+          "message": "Git repository operations"
+        },
+        "app.R2l0.desc": {
+          "source": "Provides integration with Git repositories for managing files, commits, and repository operations.\n\n**Features:**\n- Read and write files in the repository\n- Create commits from staged changes\n- Browse commit history with optional path filtering\n- List files and check repository status\n- Supports both disk-backed and virtual (in-memory) repositories",
+          "message": "Provides integration with Git repositories for managing files, commits, and repository operations.\n\n**Features:**\n- Read and write files in the repository\n- Create commits from staged changes\n- Browse commit history with optional path filtering\n- List files and check repository status\n- Supports both disk-backed and virtual (in-memory) repositories"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.display_name": {
+          "source": "Read File",
+          "message": "Read File"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.short_desc": {
+          "source": "Read a file from the repository",
+          "message": "Read a file from the repository"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.desc": {
+          "source": "Reads a file from the git repository's virtual tree or HEAD commit and returns its content as a string",
+          "message": "Reads a file from the git repository's virtual tree or HEAD commit and returns its content as a string"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "File Path"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository (e",
+          "message": "Path to the file in the repository (e"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository (e.g., `config/db.yaml`)",
+          "message": "Path to the file in the repository (e.g., `config/db.yaml`)"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.display_name": {
+          "source": "Write File",
+          "message": "Write File"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.short_desc": {
+          "source": "Write a file to the repository",
+          "message": "Write a file to the repository"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.desc": {
+          "source": "Writes a file to the git repository's virtual tree, staging it for the next commit",
+          "message": "Writes a file to the git repository's virtual tree, staging it for the next commit"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "File Path"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository",
+          "message": "Path to the file in the repository"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository",
+          "message": "Path to the file in the repository"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.display_name": {
+          "source": "Content",
+          "message": "Content"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.short_desc": {
+          "source": "The file content to write",
+          "message": "The file content to write"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.desc": {
+          "source": "The file content to write",
+          "message": "The file content to write"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.display_name": {
+          "source": "List Files",
+          "message": "List Files"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.short_desc": {
+          "source": "List files in the repository",
+          "message": "List files in the repository"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.desc": {
+          "source": "Lists all files in the git repository's virtual tree and HEAD commit",
+          "message": "Lists all files in the git repository's virtual tree and HEAD commit"
+        },
+        "app.R2l0.action.Y29tbWl0.display_name": {
+          "source": "Create Commit",
+          "message": "Create Commit"
+        },
+        "app.R2l0.action.Y29tbWl0.short_desc": {
+          "source": "Create a commit from staged changes",
+          "message": "Create a commit from staged changes"
+        },
+        "app.R2l0.action.Y29tbWl0.desc": {
+          "source": "Creates a commit from all staged/written files in the git repository",
+          "message": "Creates a commit from all staged/written files in the git repository"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.display_name": {
+          "source": "Commit Message",
+          "message": "Commit Message"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.short_desc": {
+          "source": "The commit message",
+          "message": "The commit message"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.desc": {
+          "source": "The commit message",
+          "message": "The commit message"
+        },
+        "app.R2l0.action.ZGlmZg.display_name": {
+          "source": "Compare Refs",
+          "message": "Compare Refs"
+        },
+        "app.R2l0.action.ZGlmZg.short_desc": {
+          "source": "Compute diff between two refs",
+          "message": "Compute diff between two refs"
+        },
+        "app.R2l0.action.ZGlmZg.desc": {
+          "source": "Computes the diff between two references (branches, tags, or commit SHAs) and returns a list of changed files with their status",
+          "message": "Computes the diff between two references (branches, tags, or commit SHAs) and returns a list of changed files with their status"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.display_name": {
+          "source": "From Ref",
+          "message": "From Ref"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.short_desc": {
+          "source": "Starting reference (branch, tag, or commit SHA)",
+          "message": "Starting reference (branch, tag, or commit SHA)"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.desc": {
+          "source": "Starting reference (branch, tag, or commit SHA); omit to diff from an empty tree (shows all files)",
+          "message": "Starting reference (branch, tag, or commit SHA); omit to diff from an empty tree (shows all files)"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.display_name": {
+          "source": "To Ref",
+          "message": "To Ref"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.short_desc": {
+          "source": "Ending reference",
+          "message": "Ending reference"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.desc": {
+          "source": "Ending reference; defaults to `HEAD` if omitted",
+          "message": "Ending reference; defaults to `HEAD` if omitted"
+        },
+        "app.R2l0.action.bG9n.display_name": {
+          "source": "View Commit Log",
+          "message": "View Commit Log"
+        },
+        "app.R2l0.action.bG9n.short_desc": {
+          "source": "Retrieve commit history",
+          "message": "Retrieve commit history"
+        },
+        "app.R2l0.action.bG9n.desc": {
+          "source": "Retrieves commit history from the git repository, optionally filtered by path and limited by count",
+          "message": "Retrieves commit history from the git repository, optionally filtered by path and limited by count"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.display_name": {
+          "source": "Max Count",
+          "message": "Max Count"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.short_desc": {
+          "source": "Maximum number of commits to return",
+          "message": "Maximum number of commits to return"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.desc": {
+          "source": "Maximum number of commits to return; omit for all commits",
+          "message": "Maximum number of commits to return; omit for all commits"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.display_name": {
+          "source": "Path Filter",
+          "message": "Path Filter"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.short_desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Only show commits that touch this file path"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Only show commits that touch this file path"
+        },
+        "app.R2l0.action.c3RhdHVz.display_name": {
+          "source": "Repository Status",
+          "message": "Repository Status"
+        },
+        "app.R2l0.action.c3RhdHVz.short_desc": {
+          "source": "Get repository status",
+          "message": "Get repository status"
+        },
+        "app.R2l0.action.c3RhdHVz.desc": {
+          "source": "Returns the status of the git repository showing staged, modified, and untracked files",
+          "message": "Returns the status of the git repository showing staged, modified, and untracked files"
+        }
+      }
+    }
+  }
+}
