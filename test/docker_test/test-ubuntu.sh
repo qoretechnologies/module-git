@@ -34,6 +34,9 @@ cmake .. -DCMAKE_BUILD_TYPE=debug -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 make -j${MAKE_JOBS}
 make install
 
+# Verify that source-owned provider presentation catalogs match this checkout.
+${MODULE_SRC_DIR}/test/docker_test/check-i18n.sh
+
 # run the tests
 export QORE_MODULE_DIR=${MODULE_SRC_DIR}/qlib:${QORE_MODULE_DIR}
 cd ${MODULE_SRC_DIR}
