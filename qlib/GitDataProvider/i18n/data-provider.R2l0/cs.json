@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "cs": {
+      "messages": {
+        "app.R2l0.action.Y29tbWl0.desc": {
+          "source": "Creates a commit from all staged/written files in the git repository",
+          "message": "Vytvoří commit ze všech připravených/zapsaných souborů v git repozitáři"
+        },
+        "app.R2l0.action.Y29tbWl0.display_name": {
+          "source": "Create Commit",
+          "message": "Vytvořit commit"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.desc": {
+          "source": "The commit message",
+          "message": "Zpráva commitu"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.display_name": {
+          "source": "Commit Message",
+          "message": "Zpráva commitu"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.short_desc": {
+          "source": "The commit message",
+          "message": "Zpráva commitu"
+        },
+        "app.R2l0.action.Y29tbWl0.short_desc": {
+          "source": "Create a commit from staged changes",
+          "message": "Vytvořit commit z připravených změn"
+        },
+        "app.R2l0.action.ZGlmZg.desc": {
+          "source": "Computes the diff between two references (branches, tags, or commit SHAs) and returns a list of changed files with their status",
+          "message": "Spočítá rozdíl (diff) mezi dvěma referencemi (větvemi, tagy nebo SHA commitů) a vrátí seznam změněných souborů s jejich stavem"
+        },
+        "app.R2l0.action.ZGlmZg.display_name": {
+          "source": "Compare Refs",
+          "message": "Porovnat reference"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.desc": {
+          "source": "Starting reference (branch, tag, or commit SHA); omit to diff from an empty tree (shows all files)",
+          "message": "Počáteční reference (větev, tag nebo SHA commitu); vynechte pro diff vůči prázdnému stromu (zobrazí všechny soubory)"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.display_name": {
+          "source": "From Ref",
+          "message": "Zdrojová reference"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.short_desc": {
+          "source": "Starting reference (branch, tag, or commit SHA)",
+          "message": "Počáteční reference (větev, tag nebo SHA commitu)"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.desc": {
+          "source": "Ending reference; defaults to `HEAD` if omitted",
+          "message": "Cílová reference; pokud je vynechána, výchozí je `HEAD`"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.display_name": {
+          "source": "To Ref",
+          "message": "Cílová reference"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.short_desc": {
+          "source": "Ending reference",
+          "message": "Cílová reference"
+        },
+        "app.R2l0.action.ZGlmZg.short_desc": {
+          "source": "Compute diff between two refs",
+          "message": "Spočítat diff mezi dvěma referencemi"
+        },
+        "app.R2l0.action.bG9n.desc": {
+          "source": "Retrieves commit history from the git repository, optionally filtered by path and limited by count",
+          "message": "Získá historii commitů z git repozitáře, volitelně filtrovanou podle cesty a omezenou počtem"
+        },
+        "app.R2l0.action.bG9n.display_name": {
+          "source": "View Commit Log",
+          "message": "Zobrazit historii commitů"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.desc": {
+          "source": "Maximum number of commits to return; omit for all commits",
+          "message": "Maximální počet commitů k vrácení; vynechte pro všechny commity"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.display_name": {
+          "source": "Max Count",
+          "message": "Maximální počet"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.short_desc": {
+          "source": "Maximum number of commits to return",
+          "message": "Maximální počet commitů k vrácení"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Zobrazit pouze commity, které se týkají této cesty k souboru"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.display_name": {
+          "source": "Path Filter",
+          "message": "Filtr cesty"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.short_desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Zobrazit pouze commity, které se týkají této cesty k souboru"
+        },
+        "app.R2l0.action.bG9n.short_desc": {
+          "source": "Retrieve commit history",
+          "message": "Získat historii commitů"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.desc": {
+          "source": "Lists all files in the git repository's virtual tree and HEAD commit",
+          "message": "Vypíše všechny soubory ve virtuálním stromu git repozitáře a v commitu HEAD"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.display_name": {
+          "source": "List Files",
+          "message": "Vypísat soubory"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.short_desc": {
+          "source": "List files in the repository",
+          "message": "Vypísat soubory v repozitáři"
+        },
+        "app.R2l0.action.c3RhdHVz.desc": {
+          "source": "Returns the status of the git repository showing staged, modified, and untracked files",
+          "message": "Vrátí stav git repozitáře se zobrazením připravených (staged), změněných a nesledovaných souborů"
+        },
+        "app.R2l0.action.c3RhdHVz.display_name": {
+          "source": "Repository Status",
+          "message": "Stav repozitáře"
+        },
+        "app.R2l0.action.c3RhdHVz.short_desc": {
+          "source": "Get repository status",
+          "message": "Získat stav repozitáře"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.desc": {
+          "source": "Reads a file from the git repository's virtual tree or HEAD commit and returns its content as a string",
+          "message": "Přečte soubor z virtuálního stromu git repozitáře nebo commitu HEAD a vrátí jeho obsah jako řetězec"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.display_name": {
+          "source": "Read File",
+          "message": "Načíst soubor"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository (e.g., `config/db.yaml`)",
+          "message": "Cesta k souboru v repozitáři (např. `config/db.yaml`)"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "Cesta k souboru"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository (e",
+          "message": "Cesta k souboru v repozitáři (např."
+        },
+        "app.R2l0.action.cmVhZC1maWxl.short_desc": {
+          "source": "Read a file from the repository",
+          "message": "Načíst soubor z repozitáře"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.desc": {
+          "source": "Writes a file to the git repository's virtual tree, staging it for the next commit",
+          "message": "Zapíše soubor do virtuálního stromu git repozitáře a připraví jej pro příští commit"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.display_name": {
+          "source": "Write File",
+          "message": "Zapsat soubor"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.desc": {
+          "source": "The file content to write",
+          "message": "Obsah souboru k zápisu"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.display_name": {
+          "source": "Content",
+          "message": "Obsah"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.short_desc": {
+          "source": "The file content to write",
+          "message": "Obsah souboru k zápisu"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository",
+          "message": "Cesta k souboru v repozitáři"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "Cesta k souboru"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository",
+          "message": "Cesta k souboru v repozitáři"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.short_desc": {
+          "source": "Write a file to the repository",
+          "message": "Zapsat soubor do repozitáře"
+        },
+        "app.R2l0.desc": {
+          "source": "Provides integration with Git repositories for managing files, commits, and repository operations.\n\n**Features:**\n- Read and write files in the repository\n- Create commits from staged changes\n- Browse commit history with optional path filtering\n- List files and check repository status\n- Supports both disk-backed and virtual (in-memory) repositories",
+          "message": "Poskytuje integraci s repozitáři Git pro správu souborů, commitů a operací repozitáře.\n\n**Funkce:**\n- Čtení a zápis souborů v repozitáři\n- Vytváření commitů ze změn v připravené oblasti (stage)\n- Procházení historie commitů s volitelným filtrováním podle cesty\n- Výpis souborů a kontrola stavu repozitáře\n- Podporuje repozitáře na disku i virtuální (v paměti)"
+        },
+        "app.R2l0.display_name": {
+          "source": "Git",
+          "message": "Git"
+        },
+        "app.R2l0.short_desc": {
+          "source": "Git repository operations",
+          "message": "Operace s repozitářem Git"
+        }
+      }
+    }
+  }
+}

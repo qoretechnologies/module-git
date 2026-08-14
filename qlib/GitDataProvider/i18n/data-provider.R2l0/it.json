@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "it": {
+      "messages": {
+        "app.R2l0.action.Y29tbWl0.desc": {
+          "source": "Creates a commit from all staged/written files in the git repository",
+          "message": "Crea un commit da tutti i file preparati/scritti nel repository git"
+        },
+        "app.R2l0.action.Y29tbWl0.display_name": {
+          "source": "Create Commit",
+          "message": "Crea commit"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.desc": {
+          "source": "The commit message",
+          "message": "Il messaggio di commit"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.display_name": {
+          "source": "Commit Message",
+          "message": "Messaggio di commit"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.short_desc": {
+          "source": "The commit message",
+          "message": "Il messaggio di commit"
+        },
+        "app.R2l0.action.Y29tbWl0.short_desc": {
+          "source": "Create a commit from staged changes",
+          "message": "Crea un commit dalle modifiche preparate"
+        },
+        "app.R2l0.action.ZGlmZg.desc": {
+          "source": "Computes the diff between two references (branches, tags, or commit SHAs) and returns a list of changed files with their status",
+          "message": "Calcola il diff tra due riferimenti (rami, tag o SHA di commit) e restituisce un elenco dei file modificati con il relativo stato"
+        },
+        "app.R2l0.action.ZGlmZg.display_name": {
+          "source": "Compare Refs",
+          "message": "Confronta riferimenti"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.desc": {
+          "source": "Starting reference (branch, tag, or commit SHA); omit to diff from an empty tree (shows all files)",
+          "message": "Riferimento iniziale (ramo, tag o SHA di commit); omettere per calcolare il diff da un albero vuoto (mostra tutti i file)"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.display_name": {
+          "source": "From Ref",
+          "message": "Riferimento di partenza"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.short_desc": {
+          "source": "Starting reference (branch, tag, or commit SHA)",
+          "message": "Riferimento iniziale (ramo, tag o SHA di commit)"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.desc": {
+          "source": "Ending reference; defaults to `HEAD` if omitted",
+          "message": "Riferimento finale; il valore predefinito è `HEAD` se omesso"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.display_name": {
+          "source": "To Ref",
+          "message": "Riferimento di destinazione"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.short_desc": {
+          "source": "Ending reference",
+          "message": "Riferimento finale"
+        },
+        "app.R2l0.action.ZGlmZg.short_desc": {
+          "source": "Compute diff between two refs",
+          "message": "Calcola il diff tra due riferimenti"
+        },
+        "app.R2l0.action.bG9n.desc": {
+          "source": "Retrieves commit history from the git repository, optionally filtered by path and limited by count",
+          "message": "Recupera la cronologia dei commit dal repository git, opzionalmente filtrata per percorso e limitata nel numero"
+        },
+        "app.R2l0.action.bG9n.display_name": {
+          "source": "View Commit Log",
+          "message": "Visualizza log dei commit"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.desc": {
+          "source": "Maximum number of commits to return; omit for all commits",
+          "message": "Numero massimo di commit da restituire; omettere per tutti i commit"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.display_name": {
+          "source": "Max Count",
+          "message": "Conteggio massimo"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.short_desc": {
+          "source": "Maximum number of commits to return",
+          "message": "Numero massimo di commit da restituire"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Mostra solo i commit che interessano questo percorso file"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.display_name": {
+          "source": "Path Filter",
+          "message": "Filtro percorso"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.short_desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Mostra solo i commit che interessano questo percorso file"
+        },
+        "app.R2l0.action.bG9n.short_desc": {
+          "source": "Retrieve commit history",
+          "message": "Recupera la cronologia dei commit"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.desc": {
+          "source": "Lists all files in the git repository's virtual tree and HEAD commit",
+          "message": "Elenca tutti i file nell'albero virtuale del repository git e nel commit HEAD"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.display_name": {
+          "source": "List Files",
+          "message": "Elenca file"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.short_desc": {
+          "source": "List files in the repository",
+          "message": "Elenca i file nel repository"
+        },
+        "app.R2l0.action.c3RhdHVz.desc": {
+          "source": "Returns the status of the git repository showing staged, modified, and untracked files",
+          "message": "Restituisce lo stato del repository git mostrando i file preparati, modificati e non tracciati"
+        },
+        "app.R2l0.action.c3RhdHVz.display_name": {
+          "source": "Repository Status",
+          "message": "Stato del repository"
+        },
+        "app.R2l0.action.c3RhdHVz.short_desc": {
+          "source": "Get repository status",
+          "message": "Ottieni lo stato del repository"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.desc": {
+          "source": "Reads a file from the git repository's virtual tree or HEAD commit and returns its content as a string",
+          "message": "Legge un file dall'albero virtuale del repository git o dal commit HEAD e ne restituisce il contenuto come stringa"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.display_name": {
+          "source": "Read File",
+          "message": "Leggi file"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository (e.g., `config/db.yaml`)",
+          "message": "Percorso del file nel repository (ad es., `config/db.yaml`)"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "Percorso file"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository (e",
+          "message": "Percorso del file nel repository (ad es."
+        },
+        "app.R2l0.action.cmVhZC1maWxl.short_desc": {
+          "source": "Read a file from the repository",
+          "message": "Leggi un file dal repository"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.desc": {
+          "source": "Writes a file to the git repository's virtual tree, staging it for the next commit",
+          "message": "Scrive un file nell'albero virtuale del repository git, preparandolo per il commit successivo"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.display_name": {
+          "source": "Write File",
+          "message": "Scrivi file"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.desc": {
+          "source": "The file content to write",
+          "message": "Il contenuto del file da scrivere"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.display_name": {
+          "source": "Content",
+          "message": "Contenuto"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.short_desc": {
+          "source": "The file content to write",
+          "message": "Il contenuto del file da scrivere"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository",
+          "message": "Percorso del file nel repository"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "Percorso file"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository",
+          "message": "Percorso del file nel repository"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.short_desc": {
+          "source": "Write a file to the repository",
+          "message": "Scrivi un file nel repository"
+        },
+        "app.R2l0.desc": {
+          "source": "Provides integration with Git repositories for managing files, commits, and repository operations.\n\n**Features:**\n- Read and write files in the repository\n- Create commits from staged changes\n- Browse commit history with optional path filtering\n- List files and check repository status\n- Supports both disk-backed and virtual (in-memory) repositories",
+          "message": "Fornisce l'integrazione con i repository Git per la gestione di file, commit e operazioni sul repository.\n\n**Caratteristiche:**\n- Leggi e scrivi file nel repository\n- Crea commit dalle modifiche in stage\n- Esplora la cronologia dei commit con filtro opzionale per percorso\n- Elenca i file e verifica lo stato del repository\n- Supporta sia repository su disco che virtuali (in memoria)"
+        },
+        "app.R2l0.display_name": {
+          "source": "Git",
+          "message": "Git"
+        },
+        "app.R2l0.short_desc": {
+          "source": "Git repository operations",
+          "message": "Operazioni sul repository Git"
+        }
+      }
+    }
+  }
+}

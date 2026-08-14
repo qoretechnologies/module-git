@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "uk": {
+      "messages": {
+        "app.R2l0.action.Y29tbWl0.desc": {
+          "source": "Creates a commit from all staged/written files in the git repository",
+          "message": "Створює коміт з усіх підготовлених/записаних файлів у репозиторії git"
+        },
+        "app.R2l0.action.Y29tbWl0.display_name": {
+          "source": "Create Commit",
+          "message": "Створити коміт"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.desc": {
+          "source": "The commit message",
+          "message": "Повідомлення коміту"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.display_name": {
+          "source": "Commit Message",
+          "message": "Повідомлення коміту"
+        },
+        "app.R2l0.action.Y29tbWl0.option.bWVzc2FnZQ.short_desc": {
+          "source": "The commit message",
+          "message": "Повідомлення коміту"
+        },
+        "app.R2l0.action.Y29tbWl0.short_desc": {
+          "source": "Create a commit from staged changes",
+          "message": "Створити коміт із підготовлених змін"
+        },
+        "app.R2l0.action.ZGlmZg.desc": {
+          "source": "Computes the diff between two references (branches, tags, or commit SHAs) and returns a list of changed files with their status",
+          "message": "Обчислює різницю (diff) між двома посиланнями (гілками, тегами або SHA комітів) і повертає список змінених файлів із їхнім статусом"
+        },
+        "app.R2l0.action.ZGlmZg.display_name": {
+          "source": "Compare Refs",
+          "message": "Порівняти посилання"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.desc": {
+          "source": "Starting reference (branch, tag, or commit SHA); omit to diff from an empty tree (shows all files)",
+          "message": "Початкове посилання (гілка, тег або SHA коміту); опустіть, щоб порівняти з порожнім деревом (показує всі файли)"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.display_name": {
+          "source": "From Ref",
+          "message": "Початкове посилання"
+        },
+        "app.R2l0.action.ZGlmZg.option.ZnJvbV9yZWY.short_desc": {
+          "source": "Starting reference (branch, tag, or commit SHA)",
+          "message": "Початкове посилання (гілка, тег або SHA коміту)"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.desc": {
+          "source": "Ending reference; defaults to `HEAD` if omitted",
+          "message": "Кінцеве посилання; за замовчуванням `HEAD`, якщо опущено"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.display_name": {
+          "source": "To Ref",
+          "message": "Кінцеве посилання"
+        },
+        "app.R2l0.action.ZGlmZg.option.dG9fcmVm.short_desc": {
+          "source": "Ending reference",
+          "message": "Кінцеве посилання"
+        },
+        "app.R2l0.action.ZGlmZg.short_desc": {
+          "source": "Compute diff between two refs",
+          "message": "Обчислити різницю між двома посиланнями"
+        },
+        "app.R2l0.action.bG9n.desc": {
+          "source": "Retrieves commit history from the git repository, optionally filtered by path and limited by count",
+          "message": "Отримує історію комітів із репозиторію git, із можливістю фільтрації за шляхом і обмеженням за кількістю"
+        },
+        "app.R2l0.action.bG9n.display_name": {
+          "source": "View Commit Log",
+          "message": "Переглянути журнал комітів"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.desc": {
+          "source": "Maximum number of commits to return; omit for all commits",
+          "message": "Максимальна кількість комітів для повернення; опустіть для всіх комітів"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.display_name": {
+          "source": "Max Count",
+          "message": "Максимальна кількість"
+        },
+        "app.R2l0.action.bG9n.option.bWF4X2NvdW50.short_desc": {
+          "source": "Maximum number of commits to return",
+          "message": "Максимальна кількість комітів для повернення"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Показувати лише коміти, які торкаються цього шляху до файла"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.display_name": {
+          "source": "Path Filter",
+          "message": "Фільтр шляху"
+        },
+        "app.R2l0.action.bG9n.option.cGF0aA.short_desc": {
+          "source": "Only show commits that touch this file path",
+          "message": "Показувати лише коміти, які торкаються цього шляху до файла"
+        },
+        "app.R2l0.action.bG9n.short_desc": {
+          "source": "Retrieve commit history",
+          "message": "Отримати історію комітів"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.desc": {
+          "source": "Lists all files in the git repository's virtual tree and HEAD commit",
+          "message": "Виводить список усіх файлів у віртуальному дереві репозиторію git та коміті HEAD"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.display_name": {
+          "source": "List Files",
+          "message": "Список файлів"
+        },
+        "app.R2l0.action.bGlzdC1maWxlcw.short_desc": {
+          "source": "List files in the repository",
+          "message": "Список файлів у репозиторії"
+        },
+        "app.R2l0.action.c3RhdHVz.desc": {
+          "source": "Returns the status of the git repository showing staged, modified, and untracked files",
+          "message": "Повертає статус репозиторію git, показуючи підготовлені, змінені та невідстежувані файли"
+        },
+        "app.R2l0.action.c3RhdHVz.display_name": {
+          "source": "Repository Status",
+          "message": "Статус репозиторію"
+        },
+        "app.R2l0.action.c3RhdHVz.short_desc": {
+          "source": "Get repository status",
+          "message": "Отримати статус репозиторію"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.desc": {
+          "source": "Reads a file from the git repository's virtual tree or HEAD commit and returns its content as a string",
+          "message": "Зчитує файл із віртуального дерева репозиторію git або коміту HEAD і повертає його вміст у вигляді рядка"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.display_name": {
+          "source": "Read File",
+          "message": "Прочитати файл"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository (e.g., `config/db.yaml`)",
+          "message": "Шлях до файла в репозиторії (наприклад, `config/db.yaml`)"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "Шлях до файлу"
+        },
+        "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository (e",
+          "message": "Шлях до файла в репозиторії (напр."
+        },
+        "app.R2l0.action.cmVhZC1maWxl.short_desc": {
+          "source": "Read a file from the repository",
+          "message": "Прочитати файл із репозиторію"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.desc": {
+          "source": "Writes a file to the git repository's virtual tree, staging it for the next commit",
+          "message": "Записує файл у віртуальне дерево репозиторію git, готуючи його для наступного коміту"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.display_name": {
+          "source": "Write File",
+          "message": "Записати файл"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.desc": {
+          "source": "The file content to write",
+          "message": "Вміст файла для запису"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.display_name": {
+          "source": "Content",
+          "message": "Вміст"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.Y29udGVudA.short_desc": {
+          "source": "The file content to write",
+          "message": "Вміст файла для запису"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.desc": {
+          "source": "Path to the file in the repository",
+          "message": "Шлях до файлу в репозиторії"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.display_name": {
+          "source": "File Path",
+          "message": "Шлях до файлу"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.option.cGF0aA.short_desc": {
+          "source": "Path to the file in the repository",
+          "message": "Шлях до файлу в репозиторії"
+        },
+        "app.R2l0.action.d3JpdGUtZmlsZQ.short_desc": {
+          "source": "Write a file to the repository",
+          "message": "Записати файл у репозиторій"
+        },
+        "app.R2l0.desc": {
+          "source": "Provides integration with Git repositories for managing files, commits, and repository operations.\n\n**Features:**\n- Read and write files in the repository\n- Create commits from staged changes\n- Browse commit history with optional path filtering\n- List files and check repository status\n- Supports both disk-backed and virtual (in-memory) repositories",
+          "message": "Забезпечує інтеграцію з репозиторіями Git для управління файлами, комітами та операціями з репозиторієм.\n\n**Можливості:**\n- Читання та запис файлів у репозиторії\n- Створення комітів з підготовлених змін (staged changes)\n- Перегляд історії комітів із опціональною фільтрацією за шляхом\n- Перегляд списку файлів і перевірка стану репозиторію\n- Підтримка репозиторіїв на диску та віртуальних (у пам'яті)"
+        },
+        "app.R2l0.display_name": {
+          "source": "Git",
+          "message": "Git"
+        },
+        "app.R2l0.short_desc": {
+          "source": "Git repository operations",
+          "message": "Операції з репозиторієм Git"
+        }
+      }
+    }
+  }
+}
