@@ -140,8 +140,8 @@
           "message": "檔案路徑"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
-          "source": "Path to the file in the repository (e",
-          "message": "儲存庫中檔案的路徑（例"
+          "source": "Path to the file in the repository (e.g., 'config/db.yaml')",
+          "message": "儲存庫中檔案的路徑（例如 'config/db.yaml'）"
         },
         "app.R2l0.action.cmVhZC1maWxl.short_desc": {
           "source": "Read a file from the repository",

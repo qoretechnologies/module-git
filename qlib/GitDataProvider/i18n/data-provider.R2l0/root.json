@@ -32,8 +32,8 @@
           "message": "File Path"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
-          "source": "Path to the file in the repository (e",
-          "message": "Path to the file in the repository (e"
+          "source": "Path to the file in the repository (e.g., 'config/db.yaml')",
+          "message": "Path to the file in the repository (e.g., 'config/db.yaml')"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.desc": {
           "source": "Path to the file in the repository (e.g., `config/db.yaml`)",

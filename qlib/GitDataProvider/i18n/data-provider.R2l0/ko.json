@@ -140,8 +140,8 @@
           "message": "파일 경로"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
-          "source": "Path to the file in the repository (e",
-          "message": "리포지토리 내 파일 경로(예:"
+          "source": "Path to the file in the repository (e.g., 'config/db.yaml')",
+          "message": "리포지토리 내 파일 경로(예: 'config/db.yaml')"
         },
         "app.R2l0.action.cmVhZC1maWxl.short_desc": {
           "source": "Read a file from the repository",

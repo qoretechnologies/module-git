@@ -140,8 +140,8 @@
           "message": "Шлях до файлу"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
-          "source": "Path to the file in the repository (e",
-          "message": "Шлях до файла в репозиторії (напр."
+          "source": "Path to the file in the repository (e.g., 'config/db.yaml')",
+          "message": "Шлях до файла в репозиторії (наприклад, 'config/db.yaml')"
         },
         "app.R2l0.action.cmVhZC1maWxl.short_desc": {
           "source": "Read a file from the repository",

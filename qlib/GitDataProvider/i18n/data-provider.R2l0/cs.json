@@ -140,8 +140,8 @@
           "message": "Cesta k souboru"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
-          "source": "Path to the file in the repository (e",
-          "message": "Cesta k souboru v repozitáři (např."
+          "source": "Path to the file in the repository (e.g., 'config/db.yaml')",
+          "message": "Cesta k souboru v repozitáři (např. 'config/db.yaml')"
         },
         "app.R2l0.action.cmVhZC1maWxl.short_desc": {
           "source": "Read a file from the repository",

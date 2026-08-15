@@ -140,8 +140,8 @@
           "message": "Ruta del archivo"
         },
         "app.R2l0.action.cmVhZC1maWxl.option.cGF0aA.short_desc": {
-          "source": "Path to the file in the repository (e",
-          "message": "Ruta al archivo en el repositorio (p. ej."
+          "source": "Path to the file in the repository (e.g., 'config/db.yaml')",
+          "message": "Ruta al archivo en el repositorio (p. ej., 'config/db.yaml')"
         },
         "app.R2l0.action.cmVhZC1maWxl.short_desc": {
           "source": "Read a file from the repository",
