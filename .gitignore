@@ -27,3 +27,15 @@ docs/qlib/Doxyfile.*
 .settings/
 .vscode
 .idea/
+
+# Debian package build products
+/obj-*/
+/debian/.debhelper/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/*.substvars
+/debian/*.debhelper
+/debian/qore-git-module/
+/debian/qore-git-module-doc/
+/debian/tmp/
+**/__pycache__/

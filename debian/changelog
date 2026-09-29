@@ -1,0 +1,10 @@
+qore-git-module (1.0.0~git20260928.1-0qore1~ubuntu26.04) resolute; urgency=medium
+
+  * Package native Git, four source/AOT modules, metadata and translations.
+  * Include API references, example tests and matching debug symbols.
+  * Use distribution libgit2 with offline installed and compiler tests.
+  * Require CMake 3.21 for the existing documentation copy operation.
+  * Make user-module tests work with installed and source modules.
+  * Add reproducible native build profiles and preserve AOT metadata.
+
+ -- David Nichols <david@qore.org>  Tue, 29 Sep 2026 00:44:10 +0000

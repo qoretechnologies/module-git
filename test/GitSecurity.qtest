@@ -24,10 +24,12 @@
 
 %modern
 
+%prepend-module-path ../qlib
+
 %requires git >= 1.0
-%requires ../qlib/GitForgeHelper
-%requires ../qlib/GitConnections.qm
-%requires ../qlib/GitDataProvider
+%requires GitForgeHelper
+%requires GitConnections
+%requires GitDataProvider
 %requires QUnit
 
 %exec-class GitSecurityTest

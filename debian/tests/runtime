@@ -1,0 +1,21 @@
+#!/bin/sh
+# Copyright (C) 2026 David Nichols
+# SPDX-License-Identifier: MIT
+set -eu
+export LC_ALL=C.UTF-8
+unset QORE_MODULE_DIR QORE_MODULE_DIR_ONLY QORE_INCLUDE_DIR LD_LIBRARY_PATH LD_PRELOAD
+# Test only installed modules without source module paths.
+export QORE_MODULE_DIR=$(/usr/bin/qore --module-path)
+export QORE_MODULE_DIR_ONLY=1
+cp test/*.qtest "$AUTOPKGTEST_TMP/"
+cd "$AUTOPKGTEST_TMP"
+module_dir=$(printf '%s\n' "$QORE_MODULE_DIR" | tr : '\n' | while IFS= read -r path; do
+    if [ -f "$path/GitDataProvider/GitDataProvider.qmod" ]; then printf '%s\n' "$path"; break; fi
+done)
+test -n "$module_dir"
+for test in ./*.qtest; do
+    timeout 180 /usr/bin/qore -l "$module_dir/GitDataProvider/GitDataProvider.qmod" \
+        -l "$module_dir/GitConfigManager/GitConfigManager.qmod" \
+        -l "$module_dir/GitForgeHelper/GitForgeHelper.qmod" \
+        -l "$module_dir/GitConnections.qmod" "$test" -v
+done

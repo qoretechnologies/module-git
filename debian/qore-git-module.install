@@ -1,0 +1,10 @@
+usr/lib/*/qore-modules/*.qmod
+usr/lib/*/qore-modules/GitDataProvider/
+usr/lib/*/qore-modules/GitConfigManager/
+usr/lib/*/qore-modules/GitForgeHelper/
+usr/share/qore-modules/GitDataProvider/
+usr/share/qore-modules/GitConfigManager/
+usr/share/qore-modules/GitForgeHelper/
+usr/share/qore-modules/GitConnections.qm
+usr/share/qore/metadata/git/*.meta.json
+usr/share/qore/i18n/

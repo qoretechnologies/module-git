@@ -1,0 +1,9 @@
+Document: qore-git-module
+Title: Qore Git Module Reference
+Author: Qore Technologies, s.r.o.
+Abstract: Native repository, data-provider, connection and configuration APIs.
+Section: Programming
+
+Format: HTML
+Index: /usr/share/doc/qore-git-module-doc/docs/git/html/index.html
+Files: /usr/share/doc/qore-git-module-doc/docs/*/html/*.html

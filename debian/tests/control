@@ -1,0 +1,7 @@
+Tests: runtime
+Depends: qore-git-module
+# QUnit reports progress to stderr even on success.
+Restrictions: allow-stderr
+
+Tests: compiler
+Depends: qore-git-module, libqore-dev

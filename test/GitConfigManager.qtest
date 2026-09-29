@@ -24,8 +24,10 @@
 
 %modern
 
+%prepend-module-path ../qlib
+
 %requires git >= 1.0
-%requires ../qlib/GitConfigManager
+%requires GitConfigManager
 %requires QUnit
 
 %exec-class GitConfigManagerTest

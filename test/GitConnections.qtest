@@ -24,9 +24,11 @@
 
 %modern
 
+%prepend-module-path ../qlib
+
 %requires git >= 1.0
-%requires ../qlib/GitDataProvider
-%requires ../qlib/GitConnections.qm
+%requires GitDataProvider
+%requires GitConnections
 %requires QUnit
 
 %exec-class GitConnectionsTest

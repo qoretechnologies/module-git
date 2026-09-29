@@ -24,8 +24,10 @@
 
 %modern
 
+%prepend-module-path ../qlib
+
 %requires git >= 1.0
-%requires ../qlib/GitDataProvider
+%requires GitDataProvider
 %requires QUnit
 
 %exec-class GitDataProviderTest

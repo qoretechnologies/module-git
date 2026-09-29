@@ -1,0 +1,72 @@
+Debian/Ubuntu packaging for the Git module
+===========================================
+
+qore-git-module ships native libgit2 bindings and GitDataProvider,
+GitConfigManager, GitForgeHelper and GitConnections as source/AOT modules,
+with compiler metadata, provider resources and locale catalogs. The doc package
+contains all five API references and example tests. Debhelper generates matching
+debug symbols for the native and compiled Qore modules.
+
+Use an isolated native build environment with packaged Qore and libqore-dev,
+then install debian/control's Build-Depends. Qualification targets Ubuntu 26.04
+amd64 with Qore 3.0. Other targets need matching SDKs and native tests. Cross
+builds fail explicitly because Qore tools run during compilation. Distribution
+libgit2 provides Git functionality; optional API availability is detected from
+its headers. No bundled library or build-time network download is needed.
+
+The runtime and libqore SONAME minimum versions come from the SDK used to
+compile the module. dh_shlibdeps supplies the libgit2 and other library versions
+required by its imported symbols. The native runtime is not Multi-Arch: same.
+
+Build and metadata rules
+-------------------------
+
+AOT is enabled, source-tree qmod symlinks are disabled and noopt selects AOT
+optimization level zero. QCC_JOBS=1 fixes codegen partitioning independently
+of CPU count and GNU make jobserver load; independent targets still compile
+in parallel. Timezone and locale are fixed for reproducibility. Qore tools
+use only this build and the packaged standard library, including metadata
+extraction. Debian prefix maps also cover AOT compiler output.
+
+The stripping wrapper copied from Qore preserves appended dependency and
+source-location metadata; its real-ELF tests run during builds. dwz skips the
+runtime because it does not support all LLVM DWARF forms. All catalogs and
+the project ownership manifest are packaged; the complete standard-locale
+check runs against the built provider, using qore-misc-tools.
+
+Source preparation and qualification
+------------------------------------
+
+Use a fresh version for each changed upload. This snapshot precedes 1.0.0.
+From a clean committed checkout:
+
+    version=1.0.0~git20260928.1
+    mkdir -p ../git-package-work
+    git archive --format=tar --prefix="qore-git-module-$version/" \
+        HEAD -- . ':!debian' | xz > \
+        "../git-package-work/qore-git-module_$version.orig.tar.xz"
+    tar -xf "../git-package-work/qore-git-module_$version.orig.tar.xz" \
+        -C ../git-package-work
+    cp -a debian "../git-package-work/qore-git-module-$version/"
+    cd "../git-package-work/qore-git-module-$version"
+    dpkg-buildpackage -S -us -uc
+
+Extract the .dsc into a fresh directory and run dpkg-buildpackage -b -us -uc
+unprivileged with networking disabled. -B builds runtime/debug only; -A builds
+documentation. nodoc in DEB_BUILD_OPTIONS suppresses HTML generation, and the
+nodoc profile also omits the doc package. Do not use nocheck for the full
+qualification build; subsequent profile/reproducibility builds may use it.
+
+Run all 16 upstream suites offline. Installed tests copy only scripts into a
+temporary directory, explicitly preload all four installed AOT modules and
+exclude source paths. They exercise disk and virtual repositories, branches,
+merges, diffs, blame, stash, local remotes, configuration, providers and security
+validation. Forge tests validate configuration without live GitHub/GitLab calls.
+A fresh qcc executable checks named arguments, a virtual repository commit,
+file round trip and provider discovery. External credentials are unnecessary.
+
+Check Lintian, hardening, matching debug symbols, AOT trailers, installed
+catalog/resource parity, a runtime-only install without the SDK, docs/debug
+coinstallation, dpkg -V, purge/reinstall and reproducibility across distinct
+paths and parallel job counts. Retain hashes, dependency inventories and logs.
+Testing-PPA publication is separate from approval for a final general release.

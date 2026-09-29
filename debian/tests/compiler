@@ -1,0 +1,29 @@
+#!/bin/sh
+# Copyright (C) 2026 David Nichols
+# SPDX-License-Identifier: MIT
+set -eu
+unset QORE_MODULE_DIR QORE_MODULE_DIR_ONLY QORE_INCLUDE_DIR LD_LIBRARY_PATH LD_PRELOAD
+cd "$AUTOPKGTEST_TMP"
+cat > git-smoke.q <<'EOF'
+%modern
+%requires git
+%requires DataProvider
+%requires GitDataProvider
+%requires GitConfigManager
+%requires GitForgeHelper
+%requires GitConnections
+Git::GitRepository repo = Git::GitRepository::createVirtual();
+repo.configSet("user.name", "Package Test");
+repo.configSet("user.email", "package-test@example.invalid");
+repo.writeFileString(path: "config.yaml", content: "enabled: true\n");
+string oid = repo.commit(message: "Initial configuration");
+if (oid.length() != 40 || repo.headCommitId() != oid
+    || repo.readFileString(path: "config.yaml") != "enabled: true\n") {
+    throw "PACKAGE-TEST-ERROR", "Virtual repository commit or read failed";
+}
+if (DataProvider::getFactory("git").getInfo().name != "git") {
+    throw "PACKAGE-TEST-ERROR", "Installed Git provider factory is unavailable";
+}
+EOF
+/usr/bin/qcc -o git-smoke git-smoke.q
+./git-smoke
