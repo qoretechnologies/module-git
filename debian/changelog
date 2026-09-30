@@ -1,3 +1,10 @@
+qore-git-module (1.0.0~git20260930.1-0qore1~ubuntu26.04) resolute; urgency=medium
+
+  * Run documentation postprocessing through cmake -E env so quoted build
+    paths, including Launchpad snapshot directories, work correctly.
+
+ -- David Nichols <david@qore.org>  Wed, 30 Sep 2026 04:48:12 +0000
+
 qore-git-module (1.0.0~git20260928.1-0qore1~ubuntu26.04) resolute; urgency=medium
 
   * Package native Git, four source/AOT modules, metadata and translations.
