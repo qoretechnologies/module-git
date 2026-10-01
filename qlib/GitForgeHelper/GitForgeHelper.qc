@@ -70,7 +70,7 @@ public class GitForgeHelper {
     }
 
     #! Creates the forge helper from an existing authorized REST client
-    /** This constructor accepts a @ref RestClientIo::RestClientIo "RestClientIo" instance,
+    /** This constructor accepts a @ref http_client_migration_restclient "RestClientIo" instance,
         including connections obtained from @c ConnectionProvider::get_connection().
 
         @param forge_type "github" or "gitlab"

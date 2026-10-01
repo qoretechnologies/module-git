@@ -117,7 +117,7 @@ public class GitConfigManager {
         - \c changes: @ref True if there were new commits
         - \c old_head: the previous HEAD commit ID
         - \c new_head: the current HEAD commit ID
-        - \c merge_result: the @ref hash<Git::GitMergeResult> from the pull
+        - \c merge_result: the @ref Qore::Git::GitMergeResult "GitMergeResult hash" from the pull
     */
     hash<auto> sync(*string remote, *hash<auto> merge_opts) {
         *string old_head = last_head_id;

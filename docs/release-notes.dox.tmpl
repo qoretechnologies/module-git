@@ -7,53 +7,53 @@
 
     <b>Core Repository Operations</b>
     - dual-mode architecture: disk-backed and virtual/in-memory repositories
-    - virtual filesystem API: @ref Git::GitRepository::readFile() "readFile()",
-      @ref Git::GitRepository::writeFile() "writeFile()",
-      @ref Git::GitRepository::deleteFile() "deleteFile()",
-      @ref Git::GitRepository::listFiles() "listFiles()",
-      @ref Git::GitRepository::fileExists() "fileExists()"
-    - commit operations: @ref Git::GitRepository::commit() "commit()",
-      @ref Git::GitRepository::headCommitId() "headCommitId()",
-      @ref Git::GitRepository::lookupCommit() "lookupCommit()"
-    - branch management: @ref Git::GitRepository::createBranch() "createBranch()",
-      @ref Git::GitRepository::deleteBranch() "deleteBranch()",
-      @ref Git::GitRepository::checkout() "checkout()",
-      @ref Git::GitRepository::branches() "branches()",
-      @ref Git::GitRepository::currentBranch() "currentBranch()"
-    - tag operations: @ref Git::GitRepository::createTag() "createTag()",
-      @ref Git::GitRepository::deleteTag() "deleteTag()",
-      @ref Git::GitRepository::tags() "tags()"
-    - diff and log: @ref Git::GitRepository::diff() "diff()",
-      @ref Git::GitRepository::diffPatch() "diffPatch()",
-      @ref Git::GitRepository::diffStats() "diffStats()",
-      @ref Git::GitRepository::log() "log()"
-    - blame: @ref Git::GitRepository::blame() "blame()" with per-line commit attribution
-    - stash (disk mode): @ref Git::GitRepository::stash() "stash()",
-      @ref Git::GitRepository::stashPop() "stashPop()",
-      @ref Git::GitRepository::stashList() "stashList()"
-    - remote operations: @ref Git::GitRepository::fetch() "fetch()",
-      @ref Git::GitRepository::push() "push()",
-      @ref Git::GitRepository::addRemote() "addRemote()",
-      @ref Git::GitRepository::removeRemote() "removeRemote()"
-    - repository info: @ref Git::GitRepository::status() "status()",
-      @ref Git::GitRepository::state() "state()",
-      @ref Git::GitRepository::configGet() "configGet()",
-      @ref Git::GitRepository::configSet() "configSet()"
+    - virtual filesystem API: @ref Qore::Git::GitRepository::readFile() "readFile()",
+      @ref Qore::Git::GitRepository::writeFile() "writeFile()",
+      @ref Qore::Git::GitRepository::deleteFile() "deleteFile()",
+      @ref Qore::Git::GitRepository::listFiles() "listFiles()",
+      @ref Qore::Git::GitRepository::fileExists() "fileExists()"
+    - commit operations: @ref Qore::Git::GitRepository::commit() "commit()",
+      @ref Qore::Git::GitRepository::headCommitId() "headCommitId()",
+      @ref Qore::Git::GitRepository::lookupCommit() "lookupCommit()"
+    - branch management: @ref Qore::Git::GitRepository::createBranch() "createBranch()",
+      @ref Qore::Git::GitRepository::deleteBranch() "deleteBranch()",
+      @ref Qore::Git::GitRepository::checkout() "checkout()",
+      @ref Qore::Git::GitRepository::branches() "branches()",
+      @ref Qore::Git::GitRepository::currentBranch() "currentBranch()"
+    - tag operations: @ref Qore::Git::GitRepository::createTag() "createTag()",
+      @ref Qore::Git::GitRepository::deleteTag() "deleteTag()",
+      @ref Qore::Git::GitRepository::tags() "tags()"
+    - diff and log: @ref Qore::Git::GitRepository::diff() "diff()",
+      @ref Qore::Git::GitRepository::diffPatch() "diffPatch()",
+      @ref Qore::Git::GitRepository::diffStats() "diffStats()",
+      @ref Qore::Git::GitRepository::log() "log()"
+    - blame: @ref Qore::Git::GitRepository::blame() "blame()" with per-line commit attribution
+    - stash (disk mode): @ref Qore::Git::GitRepository::stash() "stash()",
+      @ref Qore::Git::GitRepository::stashPop() "stashPop()",
+      @ref Qore::Git::GitRepository::stashList() "stashList()"
+    - remote operations: @ref Qore::Git::GitRepository::fetch() "fetch()",
+      @ref Qore::Git::GitRepository::push() "push()",
+      @ref Qore::Git::GitRepository::addRemote() "addRemote()",
+      @ref Qore::Git::GitRepository::removeRemote() "removeRemote()"
+    - repository info: @ref Qore::Git::GitRepository::status() "status()",
+      @ref Qore::Git::GitRepository::state() "state()",
+      @ref Qore::Git::GitRepository::configGet() "configGet()",
+      @ref Qore::Git::GitRepository::configSet() "configSet()"
 
     <b>Merge and Pull</b>
-    - @ref Git::GitRepository::merge() "merge()" with three conflict resolution strategies:
+    - @ref Qore::Git::GitRepository::merge() "merge()" with three conflict resolution strategies:
       detect-only, strategy-based (ours/theirs), and callback-based (for AI resolution)
-    - @ref Git::GitRepository::pull() "pull()" for fetch + merge in one operation
+    - @ref Qore::Git::GitRepository::pull() "pull()" for fetch + merge in one operation
     - three-phase lock management for safe callback invocation during merge
-    - typed hashdecls: @ref Git::GitMergeConflict, @ref Git::GitMergeResult
+    - typed hashdecls: @ref Qore::Git::GitMergeConflict, @ref Qore::Git::GitMergeResult
 
     <b>Convenience Factory</b>
-    - @ref Git::GitRepository::connectRemote() "connectRemote()" for creating virtual
+    - @ref Qore::Git::GitRepository::connectRemote() "connectRemote()" for creating virtual
       repositories connected to a remote with auto-fetch and checkout
 
     <b>Typed Hashdecls</b>
-    - @ref Git::GitSignatureInfo, @ref Git::CommitInfo, @ref Git::DiffEntry,
-      @ref Git::DiffStatsInfo, @ref Git::BlameHunkInfo, @ref Git::StashInfo
+    - @ref Qore::Git::GitSignatureInfo, @ref Qore::Git::CommitInfo, @ref Qore::Git::DiffEntry,
+      @ref Qore::Git::DiffStatsInfo, @ref Qore::Git::BlameHunkInfo, @ref Qore::Git::StashInfo
 
     <b>User Modules</b>
     - @ref gitdataproviderintro "GitDataProvider": data provider actions for read-file,
@@ -64,7 +64,7 @@
     - @ref gitconnectionsintro "GitConnections": connection provider for disk and virtual repos
 
     <b>Security and Robustness</b>
-    - virtual repositories created with @ref Git::GitRepository::createVirtual()
+    - virtual repositories created with @ref Qore::Git::GitRepository::createVirtual()
       "createVirtual()" are now genuinely in-memory (in-memory object database,
       reference database, config, and index) with <i>no</i> filesystem footprint;
       a disk-backed temporary repository is created transparently only if a remote
@@ -72,23 +72,23 @@
     - temporary directories created for remote-backed virtual repositories honor
       @c TMPDIR, are created with mode 0700, and are tracked so they are reclaimed
       at module unload even if the owning object is leaked
-    - file path arguments to @ref Git::GitRepository::readFile() "readFile()",
-      @ref Git::GitRepository::writeFile() "writeFile()",
-      @ref Git::GitRepository::deleteFile() "deleteFile()", etc. are validated to
+    - file path arguments to @ref Qore::Git::GitRepository::readFile() "readFile()",
+      @ref Qore::Git::GitRepository::writeFile() "writeFile()",
+      @ref Qore::Git::GitRepository::deleteFile() "deleteFile()", etc. are validated to
       reject absolute paths and \c ".." traversal outside the working tree; disk
       writes use @c O_NOFOLLOW so a symlink in the working tree cannot be used to
       overwrite an external file (throws \c GIT-PATH-ERROR)
     - remote URLs are validated; the \c "ext::" smart-transport scheme (arbitrary
       command execution) is rejected (throws \c GIT-REMOTE-ERROR)
-    - @ref Git::GitRepository::fetch() "fetch()" and
-      @ref Git::GitRepository::push() "push()" hold the repository lock for the
+    - @ref Qore::Git::GitRepository::fetch() "fetch()" and
+      @ref Qore::Git::GitRepository::push() "push()" hold the repository lock for the
       duration of network I/O, preventing concurrent access to the underlying
       libgit2 repository from other threads
     - when a @ref Qore::SandboxManager "SandboxManager" is active,
-      @ref Git::GitRepository::fetch() "fetch()",
-      @ref Git::GitRepository::push() "push()",
-      @ref Git::GitRepository::pull() "pull()", and
-      @ref Git::GitRepository::connectRemote() "connectRemote()" perform a
+      @ref Qore::Git::GitRepository::fetch() "fetch()",
+      @ref Qore::Git::GitRepository::push() "push()",
+      @ref Qore::Git::GitRepository::pull() "pull()", and
+      @ref Qore::Git::GitRepository::connectRemote() "connectRemote()" perform a
       best-effort network pre-flight: the remote host is resolved and every
       resolved address is validated against the network security policy
       (SSRF / private-network / cloud-metadata blocking) before connecting,

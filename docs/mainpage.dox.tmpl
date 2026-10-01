@@ -39,6 +39,34 @@
     - @ref gitforgehelperintro "GitForgeHelper" -- GitHub and GitLab pull request
       and merge request management via REST APIs
 
+    @section git_status_constants File status flags
+
+    GitRepository::status() returns a bit mask for each changed path. Flags
+    prefixed with INDEX describe staged changes; WT describes the working tree.
+
+    - @anchor GIT_STATUS_INDEX_NEW
+      @c GIT_STATUS_INDEX_NEW: New file in the index
+    - @anchor GIT_STATUS_INDEX_MODIFIED
+      @c GIT_STATUS_INDEX_MODIFIED: Modified file in the index
+    - @anchor GIT_STATUS_INDEX_DELETED
+      @c GIT_STATUS_INDEX_DELETED: Deleted file in the index
+    - @anchor GIT_STATUS_INDEX_RENAMED
+      @c GIT_STATUS_INDEX_RENAMED: Renamed file in the index
+    - @anchor GIT_STATUS_INDEX_TYPECHANGE
+      @c GIT_STATUS_INDEX_TYPECHANGE: File type changed in the index
+    - @anchor GIT_STATUS_WT_NEW
+      @c GIT_STATUS_WT_NEW: Untracked file in the working tree
+    - @anchor GIT_STATUS_WT_MODIFIED
+      @c GIT_STATUS_WT_MODIFIED: Modified file in the working tree
+    - @anchor GIT_STATUS_WT_DELETED
+      @c GIT_STATUS_WT_DELETED: Deleted file in the working tree
+    - @anchor GIT_STATUS_WT_TYPECHANGE
+      @c GIT_STATUS_WT_TYPECHANGE: File type changed in the working tree
+    - @anchor GIT_STATUS_IGNORED
+      @c GIT_STATUS_IGNORED: Path matches an ignore rule
+    - @anchor GIT_STATUS_CONFLICTED
+      @c GIT_STATUS_CONFLICTED: Path has an unresolved merge conflict
+
     @section gitquicklinks Quick Links
 
     - @ref Qore::Git::GitRepository "GitRepository class reference"

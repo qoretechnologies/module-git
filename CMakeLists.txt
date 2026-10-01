@@ -142,11 +142,11 @@ if (DOXYGEN_FOUND)
     file(COPY_FILE ${CMAKE_BINARY_DIR}/Doxyfile ${CMAKE_BINARY_DIR}/Doxyfile.final)
     file(APPEND ${CMAKE_BINARY_DIR}/Doxyfile.final
         "\n# Final pass: enable user-module cross-references and re-enable doc error warnings\n"
-        "TAGFILES = "
-        "${CMAKE_BINARY_DIR}/GitDataProvider.tag=../../GitDataProvider/html "
-        "${CMAKE_BINARY_DIR}/GitConfigManager.tag=../../GitConfigManager/html "
-        "${CMAKE_BINARY_DIR}/GitForgeHelper.tag=../../GitForgeHelper/html "
-        "${CMAKE_BINARY_DIR}/GitConnections.tag=../../GitConnections/html "
+        "TAGFILES += "
+        "\"${CMAKE_BINARY_DIR}/GitDataProvider.tag=../../GitDataProvider/html\" "
+        "\"${CMAKE_BINARY_DIR}/GitConfigManager.tag=../../GitConfigManager/html\" "
+        "\"${CMAKE_BINARY_DIR}/GitForgeHelper.tag=../../GitForgeHelper/html\" "
+        "\"${CMAKE_BINARY_DIR}/GitConnections.tag=../../GitConnections/html\" "
         "\n"
         "WARN_IF_DOC_ERROR = YES\n")
 
