@@ -29,7 +29,11 @@ BuildRequires: qore-devel >= 3.0.0~
 BuildRequires: qore-rpm-macros >= 3.0.0~
 %if %{with docs}
 BuildRequires: doxygen
-BuildRequires: /usr/bin/hardlink
+%if 0%{?suse_version}
+BuildRequires: util-linux
+%else
+BuildRequires: util-linux-core
+%endif
 %endif
 %{?qore_enable_aot_post}
 
