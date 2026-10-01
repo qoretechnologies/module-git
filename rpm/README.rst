@@ -9,7 +9,7 @@ The default build includes module tests and a separate documentation package.
 Dependencies on the installed Qore ABI and SDK version are generated from the
 built module; do not replace them with an unversioned qore dependency.
 
-Prepare a pinned source bundle with qore-packaging, then build it in the gitget
+Prepare a pinned source bundle with qore-packaging, then build it in the target
 distribution with networking disabled::
 
     python3 tools/packaging.py prepare --repo ../module-git --ref COMMIT \
