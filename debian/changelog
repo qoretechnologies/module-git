@@ -1,3 +1,10 @@
+qore-git-module (1.0.0~git20260930.1-0qore2~ubuntu26.04) UNRELEASED; urgency=medium
+
+  * Allow valid Qore source-fallback diagnostics in compiler autopkgtests
+    when additional optional modules are installed.
+
+ -- David Nichols <david@qore.org>  Thu, 01 Oct 2026 05:47:00 +0000
+
 qore-git-module (1.0.0~git20260930.1-0qore1~ubuntu26.04) resolute; urgency=medium
 
   * Run documentation postprocessing through cmake -E env so quoted build

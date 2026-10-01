@@ -5,3 +5,5 @@ Restrictions: allow-stderr
 
 Tests: compiler
 Depends: qore-git-module, libqore-dev
+# Installing optional modules can trigger a valid fallback to packaged Qore sources.
+Restrictions: allow-stderr
