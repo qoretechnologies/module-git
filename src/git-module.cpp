@@ -114,36 +114,8 @@ static void git_module_init(QoreModuleInitContext& ctx, ExceptionSink& xsink) {
     // initialize libgit2
     git_libgit2_init();
 
-    // add constants for sorting
-    gitns.addConstant("GIT_SORT_NONE", (int64)GIT_SORT_NONE);
-    gitns.addConstant("GIT_SORT_TOPOLOGICAL", (int64)GIT_SORT_TOPOLOGICAL);
-    gitns.addConstant("GIT_SORT_TIME", (int64)GIT_SORT_TIME);
-    gitns.addConstant("GIT_SORT_REVERSE", (int64)GIT_SORT_REVERSE);
-
-    // add constants for status flags
-    gitns.addConstant("GIT_STATUS_INDEX_NEW", (int64)GIT_STATUS_INDEX_NEW);
-    gitns.addConstant("GIT_STATUS_INDEX_MODIFIED", (int64)GIT_STATUS_INDEX_MODIFIED);
-    gitns.addConstant("GIT_STATUS_INDEX_DELETED", (int64)GIT_STATUS_INDEX_DELETED);
-    gitns.addConstant("GIT_STATUS_INDEX_RENAMED", (int64)GIT_STATUS_INDEX_RENAMED);
-    gitns.addConstant("GIT_STATUS_INDEX_TYPECHANGE", (int64)GIT_STATUS_INDEX_TYPECHANGE);
-    gitns.addConstant("GIT_STATUS_WT_NEW", (int64)GIT_STATUS_WT_NEW);
-    gitns.addConstant("GIT_STATUS_WT_MODIFIED", (int64)GIT_STATUS_WT_MODIFIED);
-    gitns.addConstant("GIT_STATUS_WT_DELETED", (int64)GIT_STATUS_WT_DELETED);
-    gitns.addConstant("GIT_STATUS_WT_TYPECHANGE", (int64)GIT_STATUS_WT_TYPECHANGE);
-    gitns.addConstant("GIT_STATUS_IGNORED", (int64)GIT_STATUS_IGNORED);
-    gitns.addConstant("GIT_STATUS_CONFLICTED", (int64)GIT_STATUS_CONFLICTED);
-
-    // add constants for delta types
-    gitns.addConstant("GIT_DELTA_UNMODIFIED", (int64)GIT_DELTA_UNMODIFIED);
-    gitns.addConstant("GIT_DELTA_ADDED", (int64)GIT_DELTA_ADDED);
-    gitns.addConstant("GIT_DELTA_DELETED", (int64)GIT_DELTA_DELETED);
-    gitns.addConstant("GIT_DELTA_MODIFIED", (int64)GIT_DELTA_MODIFIED);
-    gitns.addConstant("GIT_DELTA_RENAMED", (int64)GIT_DELTA_RENAMED);
-    gitns.addConstant("GIT_DELTA_COPIED", (int64)GIT_DELTA_COPIED);
-    gitns.addConstant("GIT_DELTA_IGNORED", (int64)GIT_DELTA_IGNORED);
-    gitns.addConstant("GIT_DELTA_UNTRACKED", (int64)GIT_DELTA_UNTRACKED);
-    gitns.addConstant("GIT_DELTA_TYPECHANGE", (int64)GIT_DELTA_TYPECHANGE);
-    gitns.addConstant("GIT_DELTA_CONFLICTED", (int64)GIT_DELTA_CONFLICTED);
+    // QPP declarations provide both runtime constants and API documentation.
+    init_git_constants(gitns);
 
     // add hashdecls (order matters: GitSignatureInfo before CommitInfo/BlameHunkInfo)
     hashdeclGitSignatureInfo = init_hashdecl_GitSignatureInfo(gitns);

@@ -1,0 +1,128 @@
+/* -*- mode: c++; indent-tabs-mode: nil -*- */
+/*
+    ql_git.qpp
+
+    Qore Git Module
+
+    Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+#include "git-module.h"
+
+/** @defgroup git_sort_flags Git Sort Flags
+    Commit traversal ordering flags. Flags can be combined with bitwise OR.
+*/
+///@{
+namespace Qore::Git;
+
+//! Use the default traversal order
+const GIT_SORT_NONE = GIT_SORT_NONE;
+
+//! Sort parents after their children
+const GIT_SORT_TOPOLOGICAL = GIT_SORT_TOPOLOGICAL;
+
+//! Sort commits by commit time
+const GIT_SORT_TIME = GIT_SORT_TIME;
+
+//! Reverse the traversal order
+const GIT_SORT_REVERSE = GIT_SORT_REVERSE;
+
+///@}
+
+/** @defgroup git_status_flags Git File Status Flags
+    @ref Qore::Git::GitRepository::status() "GitRepository::status()" returns a bit mask of these flags for each changed path.
+    INDEX flags describe staged changes; WT flags describe the working tree.
+*/
+///@{
+namespace Qore::Git;
+
+//! New file in the index
+const GIT_STATUS_INDEX_NEW = GIT_STATUS_INDEX_NEW;
+
+//! Modified file in the index
+const GIT_STATUS_INDEX_MODIFIED = GIT_STATUS_INDEX_MODIFIED;
+
+//! Deleted file in the index
+const GIT_STATUS_INDEX_DELETED = GIT_STATUS_INDEX_DELETED;
+
+//! Renamed file in the index
+const GIT_STATUS_INDEX_RENAMED = GIT_STATUS_INDEX_RENAMED;
+
+//! File type changed in the index
+const GIT_STATUS_INDEX_TYPECHANGE = GIT_STATUS_INDEX_TYPECHANGE;
+
+//! Untracked file in the working tree
+const GIT_STATUS_WT_NEW = GIT_STATUS_WT_NEW;
+
+//! Modified file in the working tree
+const GIT_STATUS_WT_MODIFIED = GIT_STATUS_WT_MODIFIED;
+
+//! Deleted file in the working tree
+const GIT_STATUS_WT_DELETED = GIT_STATUS_WT_DELETED;
+
+//! File type changed in the working tree
+const GIT_STATUS_WT_TYPECHANGE = GIT_STATUS_WT_TYPECHANGE;
+
+//! Path matches an ignore rule
+const GIT_STATUS_IGNORED = GIT_STATUS_IGNORED;
+
+//! Path has an unresolved merge conflict
+const GIT_STATUS_CONFLICTED = GIT_STATUS_CONFLICTED;
+
+///@}
+
+/** @defgroup git_delta_types Git Delta Types
+    Integer constants identifying kinds of change in a Git delta. These are values, not bit flags.
+*/
+///@{
+namespace Qore::Git;
+
+//! The entry is unchanged
+const GIT_DELTA_UNMODIFIED = GIT_DELTA_UNMODIFIED;
+
+//! The entry was added
+const GIT_DELTA_ADDED = GIT_DELTA_ADDED;
+
+//! The entry was deleted
+const GIT_DELTA_DELETED = GIT_DELTA_DELETED;
+
+//! The entry was modified
+const GIT_DELTA_MODIFIED = GIT_DELTA_MODIFIED;
+
+//! The entry was renamed
+const GIT_DELTA_RENAMED = GIT_DELTA_RENAMED;
+
+//! The entry was copied
+const GIT_DELTA_COPIED = GIT_DELTA_COPIED;
+
+//! The entry is ignored
+const GIT_DELTA_IGNORED = GIT_DELTA_IGNORED;
+
+//! The entry is untracked
+const GIT_DELTA_UNTRACKED = GIT_DELTA_UNTRACKED;
+
+//! The entry type changed
+const GIT_DELTA_TYPECHANGE = GIT_DELTA_TYPECHANGE;
+
+//! The entry has an unresolved merge conflict
+const GIT_DELTA_CONFLICTED = GIT_DELTA_CONFLICTED;
+
+///@}

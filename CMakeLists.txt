@@ -58,6 +58,7 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/config.h.cmake
                ${CMAKE_BINARY_DIR}/config.h)
 
 set(QPP_SRC
+    src/ql_git.qpp
     src/QC_GitRepository.qpp
 )
 
@@ -91,6 +92,7 @@ set(MODULE_DOX_INPUT
     ${CMAKE_BINARY_DIR}/release-notes.dox
     ${_dox_src}
 )
+set(QORE_DOXYGEN_MODULES ConnectionProvider DataProvider)
 set(QORE_DOXYGEN_IMAGES
     "${CMAKE_SOURCE_DIR}/qlib/GitDataProvider/git-logo.svg"
 )

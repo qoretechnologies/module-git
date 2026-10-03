@@ -18,20 +18,20 @@
       touching disk
     - full branch, tag, diff, log, and status support
     - remote operations (fetch, push) with cooperative cancellation
-    - generic @c ConnectionProvider and @c DataProvider infrastructure
+    - generic @ref connectionproviderintro "ConnectionProvider" and @ref dataproviderintro "DataProvider" infrastructure
     - high-level configuration management with observer pattern
     - GitHub and GitLab PR/MR management via REST APIs
 
     @section gitusermodules User Modules
 
-    - @ref gitdataproviderintro "GitDataProvider" -- @c DataProvider API for git
+    - @ref gitdataproviderintro "GitDataProvider" -- @ref dataproviderintro "DataProvider" API for git
       repository operations; provides read-file, write-file, list-files, commit,
       log, and status actions
-    - @ref gitconnectionsintro "GitConnections" -- @c ConnectionProvider helpers
+    - @ref gitconnectionsintro "GitConnections" -- @ref connectionproviderintro "ConnectionProvider" helpers
       registering the @c gitlocal and @c gitvirtual connection schemes
     - @ref gitconfigmanagerintro "GitConfigManager" -- high-level configuration
       management with sync/publish semantics and observer-based change detection
-      via @c AbstractWatchDataProviderBase
+      via @ref DataProvider::AbstractWatchDataProviderBase "AbstractWatchDataProviderBase"
     - @ref gitforgehelperintro "GitForgeHelper" -- GitHub and GitLab pull request
       and merge request management via REST APIs
 
@@ -43,31 +43,33 @@
 
     @section git_status_constants File status flags
 
-    GitRepository::status() returns a bit mask for each changed path. Flags
+    @ref Qore::Git::GitRepository::status() "GitRepository::status()" returns a bit mask for each changed path. Flags
     prefixed with INDEX describe staged changes; WT describes the working tree.
 
     - @anchor GIT_STATUS_INDEX_NEW
-      @c GIT_STATUS_INDEX_NEW: New file in the index
+      @ref Qore::Git::GIT_STATUS_INDEX_NEW "GIT_STATUS_INDEX_NEW": New file in the index
     - @anchor GIT_STATUS_INDEX_MODIFIED
-      @c GIT_STATUS_INDEX_MODIFIED: Modified file in the index
+      @ref Qore::Git::GIT_STATUS_INDEX_MODIFIED "GIT_STATUS_INDEX_MODIFIED": Modified file in the index
     - @anchor GIT_STATUS_INDEX_DELETED
-      @c GIT_STATUS_INDEX_DELETED: Deleted file in the index
+      @ref Qore::Git::GIT_STATUS_INDEX_DELETED "GIT_STATUS_INDEX_DELETED": Deleted file in the index
     - @anchor GIT_STATUS_INDEX_RENAMED
-      @c GIT_STATUS_INDEX_RENAMED: Renamed file in the index
+      @ref Qore::Git::GIT_STATUS_INDEX_RENAMED "GIT_STATUS_INDEX_RENAMED": Renamed file in the index
     - @anchor GIT_STATUS_INDEX_TYPECHANGE
-      @c GIT_STATUS_INDEX_TYPECHANGE: File type changed in the index
+      @ref Qore::Git::GIT_STATUS_INDEX_TYPECHANGE "GIT_STATUS_INDEX_TYPECHANGE": File type changed in the index
     - @anchor GIT_STATUS_WT_NEW
-      @c GIT_STATUS_WT_NEW: Untracked file in the working tree
+      @ref Qore::Git::GIT_STATUS_WT_NEW "GIT_STATUS_WT_NEW": Untracked file in the working tree
     - @anchor GIT_STATUS_WT_MODIFIED
-      @c GIT_STATUS_WT_MODIFIED: Modified file in the working tree
+      @ref Qore::Git::GIT_STATUS_WT_MODIFIED "GIT_STATUS_WT_MODIFIED": Modified file in the working tree
     - @anchor GIT_STATUS_WT_DELETED
-      @c GIT_STATUS_WT_DELETED: Deleted file in the working tree
+      @ref Qore::Git::GIT_STATUS_WT_DELETED "GIT_STATUS_WT_DELETED": Deleted file in the working tree
     - @anchor GIT_STATUS_WT_TYPECHANGE
-      @c GIT_STATUS_WT_TYPECHANGE: File type changed in the working tree
+      @ref Qore::Git::GIT_STATUS_WT_TYPECHANGE "GIT_STATUS_WT_TYPECHANGE": File type changed in the working tree
     - @anchor GIT_STATUS_IGNORED
-      @c GIT_STATUS_IGNORED: Path matches an ignore rule
+      @ref Qore::Git::GIT_STATUS_IGNORED "GIT_STATUS_IGNORED": Path matches an ignore rule
     - @anchor GIT_STATUS_CONFLICTED
-      @c GIT_STATUS_CONFLICTED: Path has an unresolved merge conflict
+      @ref Qore::Git::GIT_STATUS_CONFLICTED "GIT_STATUS_CONFLICTED": Path has an unresolved merge conflict
+
+    See also @ref git_sort_flags "sort flags" and @ref git_delta_types "delta types".
 
     @section gitquicklinks Quick Links
 

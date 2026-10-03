@@ -41,6 +41,9 @@
 
 #include <string>
 
+//! Initializes the constants declared in ql_git.qpp.
+DLLLOCAL void init_git_constants(QoreNamespace& ns);
+
 //! Raises a Qore exception from the last libgit2 error
 /** @param xsink the exception sink
     @param err the error code (may be empty string for generic errors)

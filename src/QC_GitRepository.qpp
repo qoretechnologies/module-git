@@ -559,7 +559,8 @@ for (hash<auto> i in (status.pairIterator())) {
     @throw GIT-STATUS-ERROR failed to get status
     @throw GIT-REPOSITORY-ERROR repository has been closed
 
-    @see @ref GIT_STATUS_INDEX_NEW, @ref GIT_STATUS_WT_MODIFIED, etc.
+    @see @ref Qore::Git::GIT_STATUS_INDEX_NEW, @ref Qore::Git::GIT_STATUS_WT_MODIFIED,
+    @ref git_status_flags
 */
 hash<string, int> GitRepository::status() {
     return repo->getStatus(xsink);
