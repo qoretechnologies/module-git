@@ -182,6 +182,8 @@ public namespace GitDataProvider {
 
     @section gitdataproviderintro GitDataProvider Module Introduction
 
+    <img src="git-logo.svg" width="96" alt="GitDataProvider module logo"/>
+
     The \c GitDataProvider module provides a data provider API for git repository operations,
     supporting both disk-backed and virtual (in-memory) repositories.
 

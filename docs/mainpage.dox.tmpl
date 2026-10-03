@@ -4,6 +4,8 @@
 
     @section gitintro Git Module Introduction
 
+    <img src="git-logo.svg" width="96" alt="git module logo"/>
+
     The git module provides git repository operations for Qore through
     <a href="https://libgit2.org/">libgit2</a>. The module supports both
     disk-backed and virtual (in-memory) repositories, enabling git operations
@@ -20,15 +22,9 @@
     - high-level configuration management with observer pattern
     - GitHub and GitLab PR/MR management via REST APIs
 
-    @section gitnavigation Documentation
-
-    - @subpage gitgettingstarted -- quick-start examples for disk and virtual repos
-    - @subpage gitcookbook -- complete code examples for common scenarios
-    - @subpage gitreleasenotes -- version history
-
     @section gitusermodules User Modules
 
-    - <img src="git-logo.svg" width="28" height="28" alt="GitDataProvider app icon"/> @ref gitdataproviderintro "GitDataProvider" -- @c DataProvider API for git
+    - @ref gitdataproviderintro "GitDataProvider" -- @c DataProvider API for git
       repository operations; provides read-file, write-file, list-files, commit,
       log, and status actions
     - @ref gitconnectionsintro "GitConnections" -- @c ConnectionProvider helpers
@@ -38,6 +34,12 @@
       via @c AbstractWatchDataProviderBase
     - @ref gitforgehelperintro "GitForgeHelper" -- GitHub and GitLab pull request
       and merge request management via REST APIs
+
+    @section gitnavigation Documentation
+
+    - @subpage gitgettingstarted -- quick-start examples for disk and virtual repos
+    - @subpage gitcookbook -- complete code examples for common scenarios
+    - @subpage gitreleasenotes -- version history
 
     @section git_status_constants File status flags
 
@@ -72,6 +74,5 @@
     - @ref Qore::Git::GitRepository "GitRepository class reference"
     - @ref gitcookbook "Code examples"
     - @ref gitreleasenotes "Release notes"
-
 
 */
