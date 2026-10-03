@@ -58,7 +58,7 @@ public class GitSignatureInfoDataType inherits HashDataType {
     }
 }
 
-#! Commit entry sub-type returned by the `log` action
+#! Commit entry sub-type returned by the <tt>log</tt> action
 public class GitCommitInfoDataType inherits HashDataType {
     private {
         const Fields = {
@@ -117,7 +117,7 @@ public class GitCommitInfoDataType inherits HashDataType {
     }
 }
 
-#! Diff entry sub-type returned by the `diff` action
+#! Diff entry sub-type returned by the <tt>diff</tt> action
 public class GitDiffEntryDataType inherits HashDataType {
     private {
         const Fields = {
