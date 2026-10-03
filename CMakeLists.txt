@@ -91,6 +91,9 @@ set(MODULE_DOX_INPUT
     ${CMAKE_BINARY_DIR}/release-notes.dox
     ${_dox_src}
 )
+set(QORE_DOXYGEN_IMAGES
+    "${CMAKE_SOURCE_DIR}/qlib/GitDataProvider/git-logo.svg"
+)
 qore_external_binary_module(${module_name} ${PROJECT_VERSION} ${LIBGIT2_LDFLAGS})
 
 qore_external_user_module("qlib/GitDataProvider" "")
@@ -130,39 +133,5 @@ if (DOXYGEN_FOUND)
     add_custom_target(QORE_MOD_DOX_FILES DEPENDS ${QORE_DOX_SRC})
     add_dependencies(docs-module QORE_MOD_DOX_FILES)
 
-    # Two-phase doc build: the initial docs-module pass generates git.tag with
-    # WARN_IF_DOC_ERROR = NO to suppress unresolved user-module cross-reference
-    # warnings. User-module docs are then built with git.tag available. The
-    # final pass rebuilds binary module docs with user-module tag files so that
-    # @ref <modname>intro links from the mainpage resolve correctly.
-    file(APPEND ${CMAKE_BINARY_DIR}/Doxyfile
-        "\n# Suppress unresolved user-module cross-reference warnings in the initial pass\n"
-        "WARN_IF_DOC_ERROR = NO\n")
-
-    file(COPY_FILE ${CMAKE_BINARY_DIR}/Doxyfile ${CMAKE_BINARY_DIR}/Doxyfile.final)
-    file(APPEND ${CMAKE_BINARY_DIR}/Doxyfile.final
-        "\n# Final pass: enable user-module cross-references and re-enable doc error warnings\n"
-        "TAGFILES += "
-        "\"${CMAKE_BINARY_DIR}/GitDataProvider.tag=../../GitDataProvider/html\" "
-        "\"${CMAKE_BINARY_DIR}/GitConfigManager.tag=../../GitConfigManager/html\" "
-        "\"${CMAKE_BINARY_DIR}/GitForgeHelper.tag=../../GitForgeHelper/html\" "
-        "\"${CMAKE_BINARY_DIR}/GitConnections.tag=../../GitConnections/html\" "
-        "\n"
-        "WARN_IF_DOC_ERROR = YES\n")
-
-    add_custom_target(docs-module-final
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_BINARY_DIR}/Doxyfile.final
-        COMMAND ${CMAKE_COMMAND} -E env ${QORE_DOCS_ENV} ${QORE_QDX_COMMAND} --post ${CMAKE_BINARY_DIR}/docs/${module_name}/html
-            ${CMAKE_BINARY_DIR}/docs/${module_name}/html/search
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Generating API documentation with Doxygen (final pass with user-module cross-references)"
-        VERBATIM
-    )
-    add_dependencies(docs-module-final
-        docs-GitDataProvider
-        docs-GitConfigManager
-        docs-GitForgeHelper
-        docs-GitConnections
-    )
-    add_dependencies(docs docs-module-final)
+    qore_binary_module_two_phase_docs(${module_name} "GitConfigManager;GitConnections;GitDataProvider;GitForgeHelper")
 endif()
