@@ -32,6 +32,7 @@
 #include <qore/QoreSandboxManager.h>
 
 #include <cstdlib>
+#include <memory>
 #include <cstring>
 #include <fcntl.h>
 #include <netdb.h>
@@ -1676,18 +1677,19 @@ QoreStringNode* QoreGitRepository::currentBranch(ExceptionSink* xsink) {
         git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to get HEAD");
         return nullptr;
     }
+    std::unique_ptr<git_reference, decltype(&git_reference_free)> head(head_ref, git_reference_free);
 
-    if (git_reference_is_branch(head_ref)) {
-        const char* name = nullptr;
-        git_branch_name(&name, head_ref);
-        git_reference_free(head_ref);
-        if (name) {
-            return new QoreStringNode(name);
-        }
+    if (!git_reference_is_branch(head.get())) {
+        return nullptr;  // detached HEAD
     }
-
-    git_reference_free(head_ref);
-    return nullptr;  // detached HEAD
+    // the name points into the reference, so it is copied while the reference is held
+    const char* name = nullptr;
+    rc = git_branch_name(&name, head.get());
+    if (rc < 0) {
+        git_raise_exception(xsink, "GIT-BRANCH-ERROR", rc, "failed to get the branch name of HEAD");
+        return nullptr;
+    }
+    return name ? new QoreStringNode(name) : nullptr;
 }
 
 // --- Tag Operations ---
