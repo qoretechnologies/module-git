@@ -46,6 +46,7 @@ public class GitConnectionsTest inherits QUnit::Test {
         addTestCase("virtual connection creates virtual repo", \testVirtualConnection());
         addTestCase("local connection data provider", \testLocalDataProvider());
         addTestCase("virtual connection data provider", \testVirtualDataProvider());
+        addTestCase("one scheme covers both kinds of repository", \testScheme());
 
         set_return_value(main());
     }
@@ -61,7 +62,7 @@ public class GitConnectionsTest inherits QUnit::Test {
         string path = m_tmpdir + "/conn-test";
         Git::GitRepository::init(path);
 
-        GitConnections::GitLocalConnection conn("test-local", "test", "gitlocal://" + path);
+        GitConnections::GitConnection conn("test-local", "test", "gitlocal://" + path);
         assertEq("gitlocal", conn.getType(), "connection type is gitlocal");
         assertTrue(conn.hasDataProvider(), "local connection has data provider");
 
@@ -70,7 +71,7 @@ public class GitConnectionsTest inherits QUnit::Test {
     }
 
     private testVirtualConnection() {
-        GitConnections::GitVirtualConnection conn("test-virtual", "test", "gitvirtual://myrepo");
+        GitConnections::GitConnection conn("test-virtual", "test", "gitvirtual://myrepo");
         assertEq("gitvirtual", conn.getType(), "connection type is gitvirtual");
         assertTrue(conn.hasDataProvider(), "virtual connection has data provider");
 
@@ -82,14 +83,31 @@ public class GitConnectionsTest inherits QUnit::Test {
         string path = m_tmpdir + "/conn-dp-test";
         Git::GitRepository::init(path);
 
-        GitConnections::GitLocalConnection conn("test-local-dp", "test", "gitlocal://" + path);
+        GitConnections::GitConnection conn("test-local-dp", "test", "gitlocal://" + path);
         AbstractDataProvider dp = conn.getDataProvider();
         assertEq("git", dp.getName(), "data provider name is 'git'");
     }
 
     private testVirtualDataProvider() {
-        GitConnections::GitVirtualConnection conn("test-virt-dp", "test", "gitvirtual://myrepo");
+        GitConnections::GitConnection conn("test-virt-dp", "test", "gitvirtual://myrepo");
         AbstractDataProvider dp = conn.getDataProvider();
         assertEq("git", dp.getName(), "data provider name is 'git'");
+    }
+
+    private testScheme() {
+        # both URL schemes are registered with the scheme of the one connection class
+        hash<ConnectionSchemeInfo> local = ConnectionSchemeCache::getSchemeEx("gitlocal");
+        hash<ConnectionSchemeInfo> virtual = ConnectionSchemeCache::getSchemeEx("gitvirtual");
+        assertEq("GitConnection", local.cls.getName());
+        assertEq("GitConnection", virtual.cls.getName());
+        assertEq(("gitlocal", "gitvirtual"), keys local.schemes);
+        assertEq(keys local.schemes, keys virtual.schemes);
+
+        # a URL with another scheme gives no repository
+        GitConnections::GitConnection conn("test-other", "test", "http://localhost/repo");
+        assertEq("http", conn.getType());
+        assertThrows("GIT-CONNECTION-ERROR", "expecting \"gitlocal\" or \"gitvirtual\"", sub () {
+            conn.get(True);
+        });
     }
 }

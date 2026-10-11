@@ -28,6 +28,7 @@
 
 %requires git >= 1.0
 %requires GitDataProvider
+%requires GitConnections
 %requires QUnit
 
 %exec-class GitDataProviderTest
@@ -35,6 +36,7 @@
 public class GitDataProviderTest inherits QUnit::Test {
     constructor() : Test("GitDataProviderTest", "1.0") {
         addTestCase("factory creates provider", \testFactory());
+        addTestCase("the application's actions take a git connection", \testAppConnection());
         addTestCase("child providers exist", \testChildProviders());
         addTestCase("write-file action", \testWriteFile());
         addTestCase("read-file action", \testReadFile());
@@ -221,5 +223,40 @@ public class GitDataProviderTest inherits QUnit::Test {
             },
             NOTHING,
             "missing path and virtual throws");
+    }
+
+    #! The Git application's actions are used with a connection, which gives the repository
+    /** An application without a connection scheme or action classes cannot be used: Qorus refuses its tool calls
+        and Qog actions.  A gitlocal or gitvirtual connection is accepted, as Qorus accepts a connection whose type
+        is one of the schemes of the application's scheme.
+    */
+    private testAppConnection() {
+        hash<DataProviderAppInfo> app = DataProviderActionCatalog::getAppEx(GitDataProvider::AppName);
+        assertEq("gitlocal", app.scheme, "the application names its connection scheme");
+        hash<ConnectionSchemeInfo> scheme = ConnectionSchemeCache::getSchemeEx(app.scheme);
+
+        string path = sprintf("%s/qore-git-app-conn-%d", tmp_location(), getpid());
+        on_exit {
+            system("rm -rf " + path);
+        }
+        Git::GitRepository::init(path);
+        list<AbstractConnection> conns = (
+            new GitConnections::GitConnection("local", "test", "gitlocal://" + path),
+            new GitConnections::GitConnection("virtual", "test", "gitvirtual://repo"),
+        );
+        list<hash<DataProviderActionInfo>> actions = DataProviderActionCatalog::getActions(app.name);
+        assertEq(7, actions.size(), "every action is registered");
+        foreach AbstractConnection conn in (conns) {
+            assertTrue(scheme.schemes{conn.getType()} ?? False, conn.getType() + " connections are accepted");
+            foreach hash<DataProviderActionInfo> action in (actions) {
+                # as Qorus creates the provider of an action with a connection
+                AbstractDataProvider prov = conn.getDataProvider();
+                foreach string seg in (action.path[1..].split("/")) {
+                    prov = prov.getChildProviderEx(seg);
+                }
+                assertTrue(prov.supportsRequest(), sprintf("%s: %s executes %s", conn.getType(), action.path,
+                    action.action));
+            }
+        }
     }
 }

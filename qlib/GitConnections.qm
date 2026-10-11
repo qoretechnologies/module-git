@@ -35,95 +35,36 @@ module GitConnections {
     url = "http://qore.org";
     license = "MIT";
     init = sub () {
-        ConnectionSchemeCache::registerScheme("gitlocal", GitLocalConnection::ConnectionScheme);
-        ConnectionSchemeCache::registerScheme("gitvirtual", GitVirtualConnection::ConnectionScheme);
+        # one scheme covers both kinds of repository; it is registered under each URL scheme
+        map ConnectionSchemeCache::registerScheme($1, GitConnection::ConnectionScheme),
+            keys GitConnection::ConnectionScheme.schemes;
     };
 }
 
 public namespace GitConnections {
 
-#! Connection for disk-backed git repositories
-/** URL format: \c gitlocal:///path/to/repo
+#! Connection for a git repository: a disk-backed repository, or a virtual (in-memory) one
+/** URL formats:
+    - \c gitlocal:///path/to/repo: the repository on disk at the path
+    - \c gitvirtual://name: a new virtual repository backed by an in-memory working tree
+
+    One connection scheme covers both kinds of repository, as one HTTP connection scheme covers \c http and
+    \c https, so the actions of the Git application take either kind of connection.
 */
-public class GitLocalConnection inherits AbstractConnectionWithInfo {
+public class GitConnection inherits AbstractConnectionWithInfo {
     public {
         #! Connection scheme info
         const ConnectionScheme = <ConnectionSchemeInfo>{
-            "display_name": "Git Local Repository",
-            "short_desc": "A connection to a local git repository on disk",
-            "desc": "Provides a connection to a disk-backed git repository. The URL path "
-                "specifies the filesystem path to the repository.",
-            "cls": Class::forName("GitConnections::GitLocalConnection"),
+            "display_name": "Git Repository",
+            "short_desc": "A connection to a git repository on disk or in memory",
+            "desc": "Provides a connection to a git repository:\n\n"
+                "- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the "
+                "repository\n"
+                "- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for "
+                "environments without persistent filesystem access",
+            "cls": Class::forName("GitConnections::GitConnection"),
             "schemes": {
                 "gitlocal": True,
-            },
-            "options": {},
-        };
-    }
-
-    #! Creates the connection from a hash
-    constructor(hash<auto> config, *hash<auto> attr) : AbstractConnectionWithInfo(config, attr) {
-    }
-
-    #! Creates the connection
-    constructor(string name, string description, string url, hash<auto> attributes = {},
-            hash<auto> options = {}, *Logger logger)
-            : AbstractConnectionWithInfo(name, description, url, attributes, options, logger) {
-    }
-
-    #! Returns the connection type
-    string getType() {
-        return "gitlocal";
-    }
-
-    #! Returns connection scheme info
-    private hash<ConnectionSchemeInfo> getConnectionSchemeInfoImpl() {
-        return ConnectionScheme;
-    }
-
-    #! Returns a GitRepository for this connection
-    /** @note A \c gitlocal:// connection grants access to a git repository on the
-        host filesystem, with the same privileges as the running process; restrict
-        who may define such connections accordingly. A \c ".." path component in
-        the URL is rejected to prevent traversal tricks.
-    */
-    private Git::GitRepository getImpl(bool connect = True, *hash<auto> rtopts) {
-        # Parse the path from the URL
-        string path = url;
-        path =~ s/^gitlocal:\/\///;
-        # reject path-traversal trickery in the connection URL
-        if (path =~ /(^|\/)\.\.(\/|$)/) {
-            throw "GIT-CONNECTION-ERROR", sprintf("gitlocal connection URL %y contains a "
-                "\"..\" path component, which is not permitted", url);
-        }
-        return new Git::GitRepository("/" + path);
-    }
-
-    #! Returns True since this connection type supports the data provider API
-    bool hasDataProvider() {
-        return True;
-    }
-
-    #! Returns a data provider for this connection
-    DataProvider::AbstractDataProvider getDataProvider(*hash<auto> constructor_options) {
-        load_module("GitDataProvider");
-        return create_object("GitDataProvider::GitDataProvider", get());
-    }
-}
-
-#! Connection for virtual/in-memory git repositories
-/** URL format: \c gitvirtual://repo-name
-*/
-public class GitVirtualConnection inherits AbstractConnectionWithInfo {
-    public {
-        #! Connection scheme info
-        const ConnectionScheme = <ConnectionSchemeInfo>{
-            "display_name": "Git Virtual Repository",
-            "short_desc": "A connection to a virtual (in-memory) git repository",
-            "desc": "Provides a connection to a virtual git repository backed by an in-memory "
-                "working tree. Use this for environments without persistent filesystem access.",
-            "cls": Class::forName("GitConnections::GitVirtualConnection"),
-            "schemes": {
                 "gitvirtual": True,
             },
             "options": {},
@@ -140,9 +81,9 @@ public class GitVirtualConnection inherits AbstractConnectionWithInfo {
             : AbstractConnectionWithInfo(name, description, url, attributes, options, logger) {
     }
 
-    #! Returns the connection type
+    #! Returns the connection type: the URL scheme, \c "gitlocal" or \c "gitvirtual"
     string getType() {
-        return "gitvirtual";
+        return urlh.protocol;
     }
 
     #! Returns connection scheme info
@@ -150,9 +91,34 @@ public class GitVirtualConnection inherits AbstractConnectionWithInfo {
         return ConnectionScheme;
     }
 
-    #! Returns a virtual GitRepository for this connection
+    #! Returns a GitRepository for this connection
+    /** @return the repository on disk for a \c gitlocal URL, or a new virtual repository for a \c gitvirtual URL
+
+        @throw GIT-CONNECTION-ERROR the URL scheme is not a git connection scheme, or a \c gitlocal URL has a \c ".."
+        path component
+
+        @note A \c gitlocal:// connection grants access to a git repository on the host filesystem, with the same
+        privileges as the running process; restrict who may define such connections accordingly. A \c ".." path
+        component in the URL is rejected to prevent traversal tricks.
+    */
     private Git::GitRepository getImpl(bool connect = True, *hash<auto> rtopts) {
-        return Git::GitRepository::createVirtual();
+        switch (urlh.protocol) {
+            case "gitlocal": {
+                # Parse the path from the URL
+                string path = url;
+                path =~ s/^gitlocal:\/\///;
+                # reject path-traversal trickery in the connection URL
+                if (path =~ /(^|\/)\.\.(\/|$)/) {
+                    throw "GIT-CONNECTION-ERROR", sprintf("gitlocal connection URL %y contains a "
+                        "\"..\" path component, which is not permitted", url);
+                }
+                return new Git::GitRepository("/" + path);
+            }
+            case "gitvirtual":
+                return Git::GitRepository::createVirtual();
+        }
+        throw "GIT-CONNECTION-ERROR", sprintf("connection URL %y has scheme %y; expecting \"gitlocal\" or "
+            "\"gitvirtual\"", url, urlh.protocol);
     }
 
     #! Returns True since this connection type supports the data provider API
@@ -166,7 +132,6 @@ public class GitVirtualConnection inherits AbstractConnectionWithInfo {
         return create_object("GitDataProvider::GitDataProvider", get());
     }
 }
-
 }
 
 /** @mainpage GitConnections Module
@@ -176,9 +141,11 @@ public class GitVirtualConnection inherits AbstractConnectionWithInfo {
     The \c GitConnections module provides connection management for git repositories,
     supporting both disk-backed and virtual (in-memory) repository connections.
 
-    Connection schemes:
+    @ref GitConnections::GitConnection "GitConnection" handles both kinds of repository by its URL scheme:
     - \c gitlocal:// - for disk-backed repositories (URL is the filesystem path)
     - \c gitvirtual:// - for virtual/in-memory repositories
+
+    The Git application's actions (see the \c GitDataProvider module) take a connection with either URL.
 
     @since 1.0
 */

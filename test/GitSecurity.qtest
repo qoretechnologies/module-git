@@ -242,7 +242,7 @@ public class GitSecurityTest inherits QUnit::Test {
     }
 
     private testGitLocalTraversal() {
-        GitConnections::GitLocalConnection conn("c", "test",
+        GitConnections::GitConnection conn("c", "test",
             "gitlocal:///some/../../etc");
         assertThrows("GIT-CONNECTION-ERROR", sub () {
             conn.get(True);

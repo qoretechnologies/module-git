@@ -27,6 +27,7 @@
 
 %requires(reexport) DataProvider
 %requires(reexport) git
+%requires GitConnections
 
 module GitDataProvider {
     version = "1.0";
@@ -41,6 +42,8 @@ module GitDataProvider {
         # Register the Git app
         DataProviderActionCatalog::registerApp(<DataProviderAppInfo>{
             "name": AppName,
+            # a gitlocal or gitvirtual connection gives the repository
+            "scheme": "gitlocal",
             "presentation_source_locale": "en",
             "display_name": "Git",
             "short_desc": "Git repository operations",
