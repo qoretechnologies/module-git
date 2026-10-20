@@ -24,7 +24,7 @@
 
 %modern
 
-%prepend-module-path ../qlib
+%prepend-module-path "${SCRIPT_DIR}/../qlib"
 
 %requires git >= 1.0
 %requires GitDataProvider
