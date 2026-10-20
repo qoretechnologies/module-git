@@ -27,7 +27,7 @@ apt-get update -qq
 apt-get install -y -qq libgit2-dev > /dev/null 2>&1
 
 # the tests must load the modules of this tree: reject relative module paths in them
-${MODULE_SRC_DIR}/test/docker_test/check-module-paths.sh
+${MODULE_SRC_DIR}/test/docker_test/check-module-paths.sh git
 
 # build module and install
 echo && echo "-- building module --"
