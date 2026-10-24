@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "ja": {
+      "messages": {
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.desc": {
+          "source": "Provides a connection to a git repository:\n\n- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the repository\n- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for environments without persistent filesystem access",
+          "message": "Gitリポジトリへの接続を提供する:\n\n- ファイルシステムパスがリポジトリのパスとなる`gitlocal://` URLを持つディスクバックエンドリポジトリ\n- 永続的なファイルシステムアクセスができない環境向けに、メモリ内ワーキングツリーでバックアップされる`gitvirtual://` URLを持つ仮想リポジトリ"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.display_name": {
+          "source": "Git Repository",
+          "message": "Gitリポジトリ"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.short_desc": {
+          "source": "A connection to a git repository on disk or in memory",
+          "message": "ディスクまたはメモリ内のGitリポジトリへの接続"
+        }
+      }
+    }
+  }
+}

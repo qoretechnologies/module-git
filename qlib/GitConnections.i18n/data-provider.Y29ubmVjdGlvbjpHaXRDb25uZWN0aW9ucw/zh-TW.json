@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "zh-TW": {
+      "messages": {
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.desc": {
+          "source": "Provides a connection to a git repository:\n\n- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the repository\n- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for environments without persistent filesystem access",
+          "message": "提供至 Git 儲存庫的連線：\n\n- 以 `gitlocal://` URL 表示的磁碟儲存庫，其路徑為儲存庫的檔案系統路徑\n- 以 `gitvirtual://` URL 表示的虛擬儲存庫，其後端為記憶體中的工作樹，適用於無持久性檔案系統存取的環境"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.display_name": {
+          "source": "Git Repository",
+          "message": "Git 儲存庫"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.short_desc": {
+          "source": "A connection to a git repository on disk or in memory",
+          "message": "至磁碟或記憶體中 Git 儲存庫的連線"
+        }
+      }
+    }
+  }
+}

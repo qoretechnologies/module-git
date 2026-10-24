@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "uk": {
+      "messages": {
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.desc": {
+          "source": "Provides a connection to a git repository:\n\n- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the repository\n- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for environments without persistent filesystem access",
+          "message": "Надає підключення до репозиторію Git:\n\n- репозиторій на диску з URL-адресою `gitlocal://`, шлях якої є шляхом до репозиторію на файловій системі\n- віртуальний репозиторій, що базується на робочій дереві в пам'яті, з URL-адресою `gitvirtual://`, для середовищ без постійного доступу до файлової системи"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.display_name": {
+          "source": "Git Repository",
+          "message": "Репозиторій Git"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.short_desc": {
+          "source": "A connection to a git repository on disk or in memory",
+          "message": "Підключення до репозиторію Git на диску або в пам'яті"
+        }
+      }
+    }
+  }
+}

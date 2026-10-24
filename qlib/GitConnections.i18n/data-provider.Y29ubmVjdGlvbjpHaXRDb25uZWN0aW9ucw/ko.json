@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "ko": {
+      "messages": {
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.desc": {
+          "source": "Provides a connection to a git repository:\n\n- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the repository\n- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for environments without persistent filesystem access",
+          "message": "Git 저장소에 대한 연결을 제공합니다:\n\n- 파일 시스템 경로가 저장소 경로인 `gitlocal://` URL을 가진 디스크 기반 저장소\n- 영구 파일 시스템 접근이 없는 환경을 위한 메모리 내 작업 트리로 백엔드가 되는 가상 저장소를 가진 `gitvirtual://` URL"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.display_name": {
+          "source": "Git Repository",
+          "message": "Git 저장소"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.short_desc": {
+          "source": "A connection to a git repository on disk or in memory",
+          "message": "디스크 또는 메모리 내의 Git 저장소에 대한 연결"
+        }
+      }
+    }
+  }
+}

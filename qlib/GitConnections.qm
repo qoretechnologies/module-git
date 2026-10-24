@@ -41,6 +41,13 @@ module GitConnections {
     };
 }
 
+/** @mainpage GitConnections Module
+    @section gitconnectionsintro GitConnections Module Introduction
+    Connections to disk-backed and virtual Git repositories share one scheme definition and presentation identity.
+    @section gitconnectionsrelnotes Release Notes
+    @subsection gitconnections_1_0 GitConnections 1.0
+    - added source-owned connection presentation catalogs in all twelve standard locales
+*/
 public namespace GitConnections {
 
 #! Connection for a git repository: a disk-backed repository, or a virtual (in-memory) one
@@ -54,7 +61,8 @@ public namespace GitConnections {
 public class GitConnection inherits AbstractConnectionWithInfo {
     public {
         #! Connection scheme info
-        const ConnectionScheme = <ConnectionSchemeInfo>{
+        const ConnectionScheme = ConnectionProvider::connection_scheme_presentation("GitConnections",
+            "GitConnection", "en", <ConnectionSchemeInfo>{
             "display_name": "Git Repository",
             "short_desc": "A connection to a git repository on disk or in memory",
             "desc": "Provides a connection to a git repository:\n\n"
@@ -68,7 +76,7 @@ public class GitConnection inherits AbstractConnectionWithInfo {
                 "gitvirtual": True,
             },
             "options": {},
-        };
+        });
     }
 
     #! Creates the connection from a hash

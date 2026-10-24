@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "fr": {
+      "messages": {
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.desc": {
+          "source": "Provides a connection to a git repository:\n\n- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the repository\n- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for environments without persistent filesystem access",
+          "message": "Fournit une connexion à un dépôt Git :\n\n- un dépôt stocké sur le disque avec une URL `gitlocal://`, dont le chemin est le chemin du système de fichiers du dépôt\n- un dépôt virtuel basé sur un arbre de travail en mémoire avec une URL `gitvirtual://`, pour les environnements sans accès persistant au système de fichiers"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.display_name": {
+          "source": "Git Repository",
+          "message": "Dépôt Git"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.short_desc": {
+          "source": "A connection to a git repository on disk or in memory",
+          "message": "Une connexion à un dépôt Git sur le disque ou en mémoire"
+        }
+      }
+    }
+  }
+}

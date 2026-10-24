@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "sk": {
+      "messages": {
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.desc": {
+          "source": "Provides a connection to a git repository:\n\n- a disk-backed repository with a `gitlocal://` URL, whose path is the filesystem path of the repository\n- a virtual repository backed by an in-memory working tree with a `gitvirtual://` URL, for environments without persistent filesystem access",
+          "message": "Poskytuje pripojenie k úložisku git:\n\n- úložisko na disku s `gitlocal://` URL, kde cesta je cesta súborového systému úložiska\n- virtuálne úložisko podporované pracovným stromom v pamäti s `gitvirtual://` URL, pre prostredia bez trvalého prístupu k súborovému systému"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.display_name": {
+          "source": "Git Repository",
+          "message": "Git úložisko"
+        },
+        "connection.R2l0Q29ubmVjdGlvbnM.scheme.R2l0Q29ubmVjdGlvbg.short_desc": {
+          "source": "A connection to a git repository on disk or in memory",
+          "message": "Pripojenie k git úložisku na disku alebo v pamäti"
+        }
+      }
+    }
+  }
+}
