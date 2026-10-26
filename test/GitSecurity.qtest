@@ -32,6 +32,8 @@
 %requires GitConnections
 %requires GitDataProvider
 %requires QUnit
+%requires Util
+%requires FsUtil
 
 %exec-class GitSecurityTest
 
@@ -56,6 +58,7 @@ public class GitSecurityTest inherits QUnit::Test {
         addTestCase("M3: gitlocal connection rejects ..", \testGitLocalTraversal());
         addTestCase("Audit-b: typed log/diff response schema", \testTypedResponseSchema());
         addTestCase("Audit-c: network sandbox pre-flight", \testNetworkSandboxPreflight());
+        addTestCase("a system-policy capability follows the system policy", \testCapability());
 
         set_return_value(main());
     }
@@ -306,5 +309,46 @@ public class GitSecurityTest inherits QUnit::Test {
         assertThrows("NETWORK-ACCESS-DENIED", sub () {
             p.callFunction("do_fetch");
         }, NOTHING, "fetch to loopback denied by network sandbox pre-flight");
+    }
+
+    private testCapability() {
+        # a sandbox that denies the filesystem and private networks
+        SandboxManager sm();
+        sm.setFilesystemDefaultPolicy(False);
+        sm.setNetworkDefaultPolicy(True);
+        sm.blockPrivateNetworks();
+        Program p(PO_NEW_STYLE);
+        p.loadModule("git");
+        p.setSandboxManager(sm);
+        p.parse("auto sub through(code c) { return c(); }", "capability-sandbox");
+
+        string dir = tmp_location() + DirSep + "qore-git-capability-" + get_random_string(8);
+        on_exit if (is_dir(dir)) { remove_tree(dir); }
+        code init = auto sub () { return Git::GitRepository::init(dir); };
+        # the same code called directly from the sandbox inherits the sandbox's policy
+        assertThrows("FILESYSTEM-ACCESS-DENIED", \p.callFunction(), ("through", init),
+            "GitRepository::init() called directly from the sandbox is denied");
+        assertFalse(is_dir(dir), "the denied init creates nothing");
+        # a system-policy capability called from the sandbox is subject to the system policy, not the sandbox's
+        Git::GitRepository repo = p.callFunction("through", SandboxManager::createSystemPolicyCall(init));
+        assertTrue(is_dir(dir + DirSep + ".git"), "GitRepository::init() runs in a system-policy capability");
+
+        code fetch = sub () {
+            Git::GitRepository virt = Git::GitRepository::createVirtual();
+            virt.addRemote('origin', 'http://127.0.0.1:9/x.git');
+            virt.fetch();
+        };
+        assertThrows("NETWORK-ACCESS-DENIED", \p.callFunction(), ("through", fetch),
+            "a fetch from a private network called directly from the sandbox is denied");
+        # in a capability the pre-flight check allows the connection, which nothing listens for
+        *hash<ExceptionInfo> error;
+        try {
+            p.callFunction("through", SandboxManager::createSystemPolicyCall(fetch));
+        } catch (hash<ExceptionInfo> ex) {
+            error = ex;
+        }
+        assertTrue(exists error, "the fetch from a closed port fails");
+        assertNeq("NETWORK-ACCESS-DENIED", error.err, "a fetch in a system-policy capability is not denied by the "
+            "sandbox: " + error.desc);
     }
 }

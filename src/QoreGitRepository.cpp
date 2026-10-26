@@ -46,7 +46,7 @@ static int qore_git_rm_cb(const char* path, const struct stat*, int, struct FTW*
 
 //! Helper to check filesystem sandbox access
 static bool checkFsAccess(const char* path, int mode, ExceptionSink* xsink) {
-    QoreSandboxManagerHelper smh;
+    QoreSandboxManagerHelper smh(QoreSandboxManagerHelper::Policy);
     if (smh) {
         if (!smh->filesystem().checkAccess(path, mode, xsink)) {
             return false;
@@ -212,7 +212,7 @@ static bool parseRemoteHostPort(const char* url, std::string& host, int& port) {
     is active), false with an exception raised otherwise
 */
 static bool checkNetAccess(const char* url, ExceptionSink* xsink) {
-    QoreSandboxManagerHelper smh;
+    QoreSandboxManagerHelper smh(QoreSandboxManagerHelper::Policy);
     if (!smh) {
         return true;  // no sandbox: fast path, no DNS overhead
     }
