@@ -43,6 +43,14 @@ ${MODULE_SRC_DIR}/test/docker_test/check-i18n.sh
 export QORE_MODULE_DIR=${MODULE_SRC_DIR}/qlib:${QORE_MODULE_DIR}
 cd ${MODULE_SRC_DIR}
 
+# the tests must load the module that this job built and installed, not one that the image already has
+loaded=$(qore -l git -e 'printf("%s", get_module_hash().git.filename);')
+if ! grep -qxF "${loaded}" ${MODULE_SRC_DIR}/build/install_manifest.txt; then
+    echo "ERROR: the tests would load '${loaded}', which this job did not install" >&2
+    exit 1
+fi
+echo "-- the tests load ${loaded}"
+
 for test in test/*.qtest; do
     qore $test -vv
 done
