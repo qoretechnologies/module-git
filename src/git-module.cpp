@@ -86,6 +86,10 @@ extern "C" DLLEXPORT void git_qore_module_desc(QoreModuleInfo& mod_info) {
     mod_info.init = git_module_init;
     mod_info.ns_init = git_module_ns_init;
     mod_info.del = git_module_delete;
+#ifdef QORE_HAS_MODULE_NS_PURGE
+    // the namespace is purged when the module is deleted, before the types are freed (see QoreModuleInfo::ns)
+    mod_info.ns = &gitns;
+#endif
     mod_info.license = QL_MIT;
     mod_info.license_str = "MIT";
 }
@@ -136,7 +140,10 @@ static void git_module_ns_init(QoreNamespace* rns, QoreNamespace* qns, Exception
 }
 
 static void git_module_delete() {
+#ifndef QORE_HAS_MODULE_NS_PURGE
+    // with QORE_HAS_MODULE_NS_PURGE, the namespace is purged after this function (see QoreModuleInfo::ns)
     gitns.clear(nullptr);
+#endif
     qore_git_cleanup_all_tempdirs();
     git_libgit2_shutdown();
 }
