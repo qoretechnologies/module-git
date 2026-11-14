@@ -22,7 +22,7 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-%requires qore >= 2.0
+%requires qore >= 3.0
 %modern
 
 %requires(reexport) git
@@ -39,6 +39,9 @@ module GitConnections {
         map ConnectionSchemeCache::registerScheme($1, GitConnection::ConnectionScheme),
             keys GitConnection::ConnectionScheme.schemes;
     };
+    # PROCESS_CONTROL: its init registers connection scheme (process-wide registrations)
+    # (a Program restricted like a Qorus interface can load the module only when it declares them; Qore #5803)
+    domains = "PROCESS_CONTROL";
 }
 
 /** @mainpage GitConnections Module
