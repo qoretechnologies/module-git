@@ -58,4 +58,12 @@ public namespace GitConfigManager {
     - Observer-based change notification via \c GitConfigWatcher
 
     @since 1.0
+
+    @subpage gitconfigmanagerreleasenotes
+*/
+
+/** @page gitconfigmanagerreleasenotes GitConfigManager Release Notes
+
+    @section gitconfigmanagerv10 GitConfigManager Module Version 1.0
+    - initial release
 */

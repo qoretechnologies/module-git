@@ -44,13 +44,6 @@ module GitConnections {
     domains = "PROCESS_CONTROL";
 }
 
-/** @mainpage GitConnections Module
-    @section gitconnectionsintro GitConnections Module Introduction
-    Connections to disk-backed and virtual Git repositories share one scheme definition and presentation identity.
-    @section gitconnectionsrelnotes Release Notes
-    @subsection gitconnections_1_0 GitConnections 1.0
-    - added source-owned connection presentation catalogs in all twelve standard locales
-*/
 public namespace GitConnections {
 
 #! Connection for a git repository: a disk-backed repository, or a virtual (in-memory) one
@@ -159,4 +152,17 @@ public class GitConnection inherits AbstractConnectionWithInfo {
     The Git application's actions (see the \c GitDataProvider module) take a connection with either URL.
 
     @since 1.0
+
+    @par Usage notes
+    Connection option labels and descriptions for disk-backed and virtual repositories share the same localized catalog.
+
+
+
+    @subpage gitconnectionsreleasenotes
+*/
+
+/** @page gitconnectionsreleasenotes GitConnections Release Notes
+
+    @section gitconnections_1_0 GitConnections Module Version 1.0
+    - initial release
 */

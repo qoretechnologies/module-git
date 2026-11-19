@@ -203,4 +203,12 @@ public namespace GitDataProvider {
     - \c status: Get repository status
 
     @since 1.0
+
+    @subpage gitdataproviderreleasenotes
+*/
+
+/** @page gitdataproviderreleasenotes GitDataProvider Release Notes
+
+    @section gitdataproviderv10 GitDataProvider Module Version 1.0
+    - initial release
 */

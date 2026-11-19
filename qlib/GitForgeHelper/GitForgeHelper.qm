@@ -65,4 +65,12 @@ hash<auto> pr = helper.createPullRequest("feature-branch", "main",
     @endcode
 
     @since 1.0
+
+    @subpage gitforgehelperreleasenotes
+*/
+
+/** @page gitforgehelperreleasenotes GitForgeHelper Release Notes
+
+    @section gitforgehelperv10 GitForgeHelper Module Version 1.0
+    - initial release
 */
