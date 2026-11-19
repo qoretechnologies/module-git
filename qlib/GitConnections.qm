@@ -163,6 +163,6 @@ public class GitConnection inherits AbstractConnectionWithInfo {
 
 /** @page gitconnectionsreleasenotes GitConnections Release Notes
 
-    @section gitconnectionsv10 GitConnections Module Version 1.0
+    @section gitconnections_1_0 GitConnections Module Version 1.0
     - initial release
 */
