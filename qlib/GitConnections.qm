@@ -55,6 +55,14 @@ public namespace GitConnections {
     \c https, so the actions of the Git application take either kind of connection.
 */
 public class GitConnection inherits AbstractConnectionWithInfo {
+    #! Returns the functional domains of the connection's clients (qoretechnologies/qore#7094)
+    /** The clients use a repository on disk (\c gitlocal) and the remotes of a repository (also of a \c gitvirtual
+        one) over the network
+    */
+    private final int getConnectionDomainsImpl() {
+        return DOM_FILESYSTEM | DOM_NETWORK;
+    }
+
     public {
         #! Connection scheme info
         const ConnectionScheme = ConnectionProvider::connection_scheme_presentation("GitConnections",
