@@ -372,6 +372,160 @@ static bool checkNetAccess(const char* url, ExceptionSink* xsink) {
     return allowed;
 }
 
+//! Returns true if \a url starts with \a prefix, ignoring the case of ASCII letters
+static bool hasPrefixIcase(const char* url, const char* prefix) {
+    return !strncasecmp(url, prefix, strlen(prefix));
+}
+
+//! The URL prefixes of the transports of libgit2 that connect over the network
+static const char* const NetworkTransportPrefixes[] = {
+    "git://", "http://", "https://", "ssh://", "ssh+git://", "git+ssh://", nullptr,
+};
+
+//! Returns the value of a hexadecimal digit, or -1
+static int hexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+//! Converts a file:// URL to the local path that the local transport of libgit2 opens
+/** As libgit2 does (git_fs_path_fromurl()): \c "file:///path" and \c "file://localhost/path" name \c "/path", with
+    percent-encoded octets decoded
+
+    @return true if the URL names a local path, false (with an exception raised) if it cannot be converted, which
+    the local transport refuses too
+*/
+static bool fileUrlToPath(const char* url, std::string& path, ExceptionSink* xsink) {
+    const char* p = url + 7;
+    if (hasPrefixIcase(p, "localhost/")) {
+        p += 9;
+    }
+    // the path is absolute, with one leading slash
+    if (*p != '/' || p[1] == '/') {
+        xsink->raiseException("FILESYSTEM-ACCESS-DENIED", "remote URL '%s' does not name a local path that can be "
+            "checked against the file-system policy of the sandbox", url);
+        return false;
+    }
+    path.clear();
+    for (; *p; ++p) {
+        int h, l;
+        if (*p == '%' && (h = hexDigitValue(p[1])) >= 0 && (l = hexDigitValue(p[2])) >= 0) {
+            char c = static_cast<char>((h << 4) | l);
+            if (!c) {
+                xsink->raiseException("FILESYSTEM-ACCESS-DENIED", "remote URL '%s' names a path with a NUL "
+                    "character", url);
+                return false;
+            }
+            path += c;
+            p += 2;
+        } else {
+            path += *p;
+        }
+    }
+    return true;
+}
+
+//! Checks a local remote repository against the file-system policy of the sandbox
+/** The path of the remote and the git directory and common directory of the repository that libgit2 opens there
+    (which a \c .git file in the path can place elsewhere) are checked with the given access mode
+*/
+static bool checkLocalRemoteAccess(QoreSandboxManager* sm, const std::string& path, int mode, ExceptionSink* xsink) {
+    if (!sm->filesystem().checkAccess(path.c_str(), mode, xsink)) {
+        return false;
+    }
+    // the repository that the local transport opens: a path that is not a repository is refused by libgit2
+    git_repository* repo = nullptr;
+    if (git_repository_open_ext(&repo, path.c_str(), GIT_REPOSITORY_OPEN_NO_SEARCH, nullptr) < 0) {
+        return true;
+    }
+    bool ok = true;
+    const char* dirs[] = { git_repository_path(repo), git_repository_commondir(repo) };
+    for (const char* dir : dirs) {
+        if (dir && !sm->filesystem().checkAccess(dir, mode, xsink)) {
+            ok = false;
+            break;
+        }
+    }
+    git_repository_free(repo);
+    return ok;
+}
+
+//! Checks the URL of a remote against the policy of the sandbox before libgit2 connects to it
+/** A repository that libgit2 reaches with its local transport reads (and for a push, writes) the file system: it is
+    checked against the file-system policy of an active sandbox (see checkLocalRemoteAccess()) with \c QSEC_READ for
+    a fetch and \c QSEC_READ | \c QSEC_WRITE for a push; one that it reaches over the network is checked against
+    the network policy of an active sandbox (see checkNetAccess()).  When no sandbox manager is active nothing is
+    checked.
+
+    A URL is local, as libgit2 selects its transport, if it is a \c file:// URL, or if it has none of the prefixes of
+    the network transports and it is a path: it starts with \c "/" or \c ".", has no \c ":", or names an existing
+    file.  A local path is checked whether it exists or not, and a URL that can be either an existing path or a host
+    and path (\c "host:path") is checked as both.
+
+    @param url the URL that libgit2 uses for the direction: the remote's URL after any \c insteadOf rewriting for a
+    fetch, its push URL (or URL) after any rewriting for a push
+    @param push true for a push
+
+    @return true if the access is permitted, false with an exception raised otherwise
+*/
+static bool checkRemoteAccess(const char* url, bool push, ExceptionSink* xsink) {
+    QoreSandboxManagerHelper smh(QoreSandboxManagerHelper::Policy);
+    if (!smh) {
+        return true;
+    }
+    if (!url || !*url) {
+        return true;  // libgit2 refuses a remote without a URL
+    }
+    bool local, network;
+    std::string path;
+    if (hasPrefixIcase(url, "file://")) {
+        local = true;
+        network = false;
+    } else {
+        bool network_prefix = false;
+        for (const char* const* prefix = NetworkTransportPrefixes; *prefix; ++prefix) {
+            if (hasPrefixIcase(url, *prefix)) {
+                network_prefix = true;
+                break;
+            }
+        }
+        bool has_colon = strchr(url, ':');
+        struct stat st;
+        local = !network_prefix && (url[0] == '/' || url[0] == '.' || !has_colon || !::stat(url, &st));
+        network = !local || has_colon;
+        if (local) {
+            path = url;
+        }
+    }
+
+    if (local) {
+        if (path.empty() && !fileUrlToPath(url, path, xsink)) {
+            return false;
+        }
+        if (!checkLocalRemoteAccess(smh.get(), path, push ? (QSEC_READ | QSEC_WRITE) : QSEC_READ, xsink)) {
+            return false;
+        }
+    }
+    return !network || checkNetAccess(url, xsink);
+}
+
+//! Returns the URL that libgit2 uses for a fetch from or a push to a remote that was looked up
+/** The URL of the remote, or for a push its push URL if it has one, as git_remote_lookup() set them, after any
+    \c insteadOf or \c pushInsteadOf rewriting
+*/
+static const char* getRemoteUrlForDirection(git_remote* remote, bool push) {
+    const char* url = push ? git_remote_pushurl(remote) : nullptr;
+    return url ? url : git_remote_url(remote);
+}
+
 // --- Constructors ---
 
 QoreGitRepository::QoreGitRepository(const char* path, ExceptionSink* xsink)
@@ -2290,8 +2444,9 @@ int QoreGitRepository::fetch(const char* remote_name, ExceptionSink* xsink) {
         return git_raise_exception(xsink, "GIT-FETCH-ERROR", rc, "failed to look up remote");
     }
 
-    // Best-effort network sandbox pre-flight on the resolved remote address
-    if (!checkNetAccess(git_remote_url(remote), xsink)) {
+    // sandbox pre-flight on the URL that libgit2 uses: the file-system policy for a local repository, the network
+    // policy (best-effort) for the resolved remote address
+    if (!checkRemoteAccess(getRemoteUrlForDirection(remote, false), false, xsink)) {
         git_remote_free(remote);
         return -1;
     }
@@ -2339,8 +2494,9 @@ int QoreGitRepository::push(const char* remote_name, const char* refspec, Except
         return git_raise_exception(xsink, "GIT-PUSH-ERROR", rc, "failed to look up remote");
     }
 
-    // Best-effort network sandbox pre-flight on the resolved remote address
-    if (!checkNetAccess(git_remote_url(remote), xsink)) {
+    // sandbox pre-flight on the URL that libgit2 uses: the file-system policy for a local repository, the network
+    // policy (best-effort) for the resolved remote address
+    if (!checkRemoteAccess(getRemoteUrlForDirection(remote, true), true, xsink)) {
         git_remote_free(remote);
         return -1;
     }
