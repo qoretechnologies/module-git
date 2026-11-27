@@ -124,7 +124,13 @@ public class GitConnection inherits AbstractConnectionWithInfo {
                     throw "GIT-CONNECTION-ERROR", sprintf("gitlocal connection URL %y contains a "
                         "\"..\" path component, which is not permitted", url);
                 }
-                return new Git::GitRepository("/" + path);
+                # the path of gitlocal:///path is absolute already; that of gitlocal://path is made absolute: a
+                # leading "//" is kept by the realpath() of some C libraries (musl), so the path would not match the
+                # paths that a sandbox's file-system policy allows
+                if (path !~ /^\//) {
+                    path = "/" + path;
+                }
+                return new Git::GitRepository(path);
             }
             case "gitvirtual":
                 return Git::GitRepository::createVirtual();

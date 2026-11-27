@@ -110,6 +110,7 @@ auto sub get_repo(AbstractConnection conn, string url) {
         host_repo = makeRepo("host", "host\n");
         other_repo = makeRepo("other", "other\n");
 
+        addTestCase("URL forms", \testUrlForms());
         foreach string mode in (keys Modes) {
             string m = mode;
             addTestCase("data provider, " + m, sub () { testDataProvider(m); });
@@ -159,6 +160,16 @@ auto sub get_repo(AbstractConnection conn, string url) {
         conn.urlh = parse_url(other_url);
         assertEq("other\n", conn.getDataProvider().getChildProviderEx("read-file").doRequest({"path": "file.txt"})
             .content, "host " + mode);
+    }
+
+    #! both forms of a gitlocal URL name the absolute path, without a leading "//" that musl's realpath() keeps
+    testUrlForms() {
+        foreach string url in ("gitlocal://" + host_repo, "gitlocal://" + host_repo.substr(1)) {
+            GitConnection conn("t", "", url);
+            Git::GitRepository repo = conn.get();
+            assertEq("host\n", repo.readFileString("file.txt"), url);
+            assertEq(host_repo + "/", repo.workdir(), url);
+        }
     }
 
     private testGet(string mode) {
