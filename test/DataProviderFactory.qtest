@@ -1,0 +1,189 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  DataProviderFactory.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%prepend-module-path "${SCRIPT_DIR}/../build"
+%prepend-module-path "${SCRIPT_DIR}/../qlib"
+
+%requires git >= 1.0
+%requires FsUtil
+%requires DataProvider
+%requires GitDataProvider
+%requires QUnit
+
+%exec-class DataProviderFactoryTest
+
+#! Tests the git data provider factory (module-git#10)
+/** The factory creates the provider from its options, with any of the factory APIs of the DataProvider module.  A
+    \c path option is the input of the code that creates the provider: code restricted from the file system
+    (PO_NO_FILESYSTEM) is refused with PERMISSION-DENIED before the repository is opened, also when it creates the
+    provider with a factory that the host lent to it, and a sandbox's file-system policy applies when the repository
+    is opened; a virtual repository is not a path and stays usable for restricted code.
+*/
+class DataProviderFactoryTest inherits QUnit::Test {
+    private {
+        const Modes = {"ast": EM_AST, "ir": EM_IR, "jit": EM_JIT, "tiered": EM_TIERED};
+
+        const Source = "%modern
+%requires DataProvider
+
+# lists the files of a provider that a factory creates with DataProvider::getFactoryObject()
+string sub create(hash<auto> opts) {
+    try {
+        return list_files(DataProvider::getFactoryObject(\"git\", opts));
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+# lists the files of a provider that a lent factory creates
+string sub create_lent(AbstractDataProviderFactory factory, hash<auto> opts, *bool with_template) {
+    try {
+        return list_files(with_template ? factory.createWithTemplate(NOTHING, opts) : factory.create(opts));
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+string sub list_files(AbstractDataProvider dp) {
+    return (dp.getChildProviderEx(\"list-files\").doRequest().files ?? ()).join(\",\");
+}
+";
+    }
+
+    private {
+        #! the directory of the test
+        string dir;
+        #! the path of a repository with one committed file
+        string repo_path;
+    }
+
+    constructor() : QUnit::Test("DataProviderFactory", "1.0", \ARGV) {
+        dir = make_tmp_dir("git-dp-factory-");
+        repo_path = dir + "/repo";
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@example.com");
+        repo.writeFileString("file.txt", "content\n");
+        repo.commit("initial");
+
+        addTestCase("factory", \testFactory());
+        foreach string mode in (keys Modes) {
+            string m = mode;
+            addTestCase("restricted, " + m, sub () { testRestricted(m); });
+        }
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (dir) {
+            remove_tree(dir);
+        }
+    }
+
+    testFactory() {
+        AbstractDataProvider dp = DataProvider::getFactoryObject("git", {"path": repo_path});
+        assertEq(GitDataProvider::GitDataProvider::ProviderInfo.name, dp.getName());
+        assertEq("content\n", dp.getChildProviderEx("read-file").doRequest({"path": "file.txt"}).content);
+        # a path to a child provider
+        dp = DataProvider::getFactoryObject("git/read-file", {"path": repo_path});
+        assertEq("content\n", dp.doRequest({"path": "file.txt"}).content);
+        # template options are ignored
+        dp = DataProvider::getFactoryObjectWithTemplate("git", {"x": 1}, {"path": repo_path});
+        assertEq("content\n", dp.getChildProviderEx("read-file").doRequest({"path": "file.txt"}).content);
+        # factory strings
+        dp = DataProvider::getFactoryObjectFromString("git{virtual=true}");
+        dp.getChildProviderEx("write-file").doRequest({"path": "x.txt", "content": "x"});
+        assertEq("x", dp.getChildProviderEx("read-file").doRequest({"path": "x.txt"}).content);
+        dp = DataProvider::getFactoryObjectFromString(sprintf("git{path=%s}/read-file", repo_path));
+        assertEq("content\n", dp.doRequest({"path": "file.txt"}).content);
+        # the factory object
+        AbstractDataProviderFactory factory = DataProvider::getFactoryEx("git");
+        assertEq("content\n", factory.create({"path": repo_path}).getChildProviderEx("read-file")
+            .doRequest({"path": "file.txt"}).content);
+
+        # invalid options
+        assertThrows("CONSTRUCTOR-ERROR", "either 'path' or 'virtual'", \factory.create(), {});
+        assertThrows("CONSTRUCTOR-ERROR", "either 'path' or 'virtual'", \factory.create());
+        assertThrows("CONSTRUCTOR-ERROR", "mutually exclusive", \factory.create(), {"path": repo_path,
+            "virtual": True});
+        assertThrows("CONSTRUCTOR-ERROR", "unknown", \factory.create(), {"unknown": 1});
+        assertThrows("GIT-REPOSITORY-OPEN-ERROR", \factory.create(), {"path": dir + "/missing"});
+    }
+
+    testRestricted(string mode) {
+        hash<auto> path_opts = {"path": repo_path};
+        # code restricted from the file system creates no provider for a path
+        assertEq("PERMISSION-DENIED", getProgram("nofs", mode).callFunction("create", path_opts), "nofs " + mode);
+        # also with a factory that the host lent to it: the registered one, and one that the host created itself
+        AbstractDataProviderFactory factory = DataProvider::getFactoryEx("git");
+        foreach AbstractDataProviderFactory f in ((factory, new GitDataProvider::GitDataProviderFactory())) {
+            foreach bool with_template in ((False, True)) {
+                string desc = sprintf("%s %y %s", f == factory ? "registered" : "host", with_template, mode);
+                assertEq("PERMISSION-DENIED", getProgram("nofs", mode).callFunction("create_lent", f, path_opts,
+                    with_template), "nofs lent " + desc);
+                assertEq("PERMISSION-DENIED", getProgram("nofs", mode).callFunction("create_lent", f,
+                    {"path": "/etc"}, with_template), "nofs lent /etc " + desc);
+                assertEq("", getProgram("nofs", mode).callFunction("create_lent", f, {"virtual": True},
+                    with_template), "nofs lent virtual " + desc);
+            }
+        }
+        # a virtual repository is not a path
+        assertEq("", getProgram("nofs", mode).callFunction("create", {"virtual": True}), "nofs virtual " + mode);
+        # the sandbox refuses by its file-system policy when the repository is opened
+        assertEq("FILESYSTEM-ACCESS-DENIED", getProgram("sandbox", mode).callFunction("create", path_opts),
+            "sandbox " + mode);
+        assertEq("FILESYSTEM-ACCESS-DENIED", getProgram("sandbox", mode).callFunction("create_lent", factory,
+            path_opts), "sandbox lent " + mode);
+        # an unrestricted caller opens its repository
+        assertEq("file.txt", getProgram("unrestricted", mode).callFunction("create", path_opts),
+            "unrestricted " + mode);
+        assertEq("file.txt", getProgram("unrestricted", mode).callFunction("create_lent", factory, path_opts),
+            "unrestricted lent " + mode);
+    }
+
+    #! returns a Program of the given kind
+    private Program getProgram(string kind, string mode) {
+        Program p;
+        switch (kind) {
+            case "nofs":
+                p = new Program(PO_NEW_STYLE | PO_NO_FILESYSTEM);
+                break;
+            case "sandbox": {
+                SandboxManager sm();
+                sm.setFilesystemDefaultPolicy(False);
+                p = new Program(PO_NEW_STYLE);
+                p.setSandboxManager(sm);
+                break;
+            }
+            default:
+                p = new Program(PO_NEW_STYLE);
+                break;
+        }
+        p.setExecMode(Modes{mode});
+        p.parse(Source, kind);
+        return p;
+    }
+}

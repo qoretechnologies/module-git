@@ -111,6 +111,12 @@
     repo.push();
     @endcode
 
+    A remote whose URL is a local path or a \c file:// URL is read and written by libgit2 directly: for sandboxed
+    code, its location must be allowed by the file-system policy of the sandbox (read access for a fetch, a pull and
+    @ref Qore::Git::GitRepository::connectRemote() "connectRemote()", read, write, create and delete access for a
+    push), or the operation is refused with \c FILESYSTEM-ACCESS-DENIED before the remote is opened (see
+    @ref Qore::Git::GitRepository::fetch() "fetch()").
+
     @section gitcookbookmerge Merge with Conflict Resolution
 
     @code{.py}
@@ -264,6 +270,26 @@
     hash<auto> file = reader.doRequest({"path": "config.yaml"});
     printf("Content: %s\n", file.content);
     @endcode
+
+    The provider can also be created by its factory, from its constructor options (\c path or \c virtual):
+
+    @code{.py}
+    %modern
+    %requires DataProvider
+    %requires GitDataProvider
+
+    AbstractDataProvider dp = DataProvider::getFactoryObject("git", {"path": "/path/to/repo"});
+    AbstractDataProvider reader = DataProvider::getFactoryObjectFromString("git{virtual=true}/read-file");
+    @endcode
+
+    A \c path given by code restricted from the \c FILESYSTEM functional domain is refused with
+    \c PERMISSION-DENIED, also through a factory that the host lent to it; a virtual repository stays usable for such
+    code.  A @ref GitConnections::GitConnection "GitConnection" that the host creates and lends to restricted code
+    opens the repository of the URL that the host gave: a change of the connection's members by that code is
+    refused.
+
+    Repository paths are normalized as git stores them: \c "." and empty components are removed, so
+    \c "./config//db.yaml" is written, staged and committed as \c "config/db.yaml".
 
     @section gitcookbookforge GitForgeHelper (PR/MR)
 

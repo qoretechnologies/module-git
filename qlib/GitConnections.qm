@@ -124,7 +124,13 @@ public class GitConnection inherits AbstractConnectionWithInfo {
                     throw "GIT-CONNECTION-ERROR", sprintf("gitlocal connection URL %y contains a "
                         "\"..\" path component, which is not permitted", url);
                 }
-                return new Git::GitRepository("/" + path);
+                # the path of gitlocal:///path is absolute already; that of gitlocal://path is made absolute: a
+                # leading "//" is kept by the realpath() of some C libraries (musl), so the path would not match the
+                # paths that a sandbox's file-system policy allows
+                if (path !~ /^\//) {
+                    path = "/" + path;
+                }
+                return new Git::GitRepository(path);
             }
             case "gitvirtual":
                 return Git::GitRepository::createVirtual();
@@ -139,8 +145,18 @@ public class GitConnection inherits AbstractConnectionWithInfo {
     }
 
     #! Returns a data provider for this connection
+    /** The provider's repository is the one that get() opens: for code that was lent the connection by the code that
+        created it and that is restricted from the \c FILESYSTEM or \c NETWORK functional domain, from the URL that
+        the connection's creator gave, so that changing the connection's public members (\c url, \c urlh, \c opts)
+        cannot point it to another repository
+
+        @throw PERMISSION-DENIED the calling code was lent the connection, is restricted from the \c FILESYSTEM or
+        \c NETWORK functional domain, and the connection's URL or options are not the ones that its creator gave
+    */
     DataProvider::AbstractDataProvider getDataProvider(*hash<auto> constructor_options) {
         load_module("GitDataProvider");
+        # get() creates the repository from a private copy of the connection with its creator's members for
+        # restricted code that was lent the connection (module-git#8)
         return create_object("GitDataProvider::GitDataProvider", get());
     }
 }

@@ -308,7 +308,8 @@ bool GitRepository::isVirtual() [flags=CONSTANT] {
 *binary data = repo.readFile("config/db.yaml");
     @endcode
 
-    @param path the file path within the repository
+    @param path the file path within the repository, relative to the working tree; it is normalized as git stores
+    paths: \c "." and empty components are removed, so \c "./a//b" names \c "a/b"
 
     @return the file content as binary data, or @ref nothing if the file does not exist
 
@@ -325,7 +326,8 @@ bool GitRepository::isVirtual() [flags=CONSTANT] {
 *string yaml = repo.readFileString("config/db.yaml");
     @endcode
 
-    @param path the file path within the repository
+    @param path the file path within the repository, relative to the working tree; it is normalized as git stores
+    paths: \c "." and empty components are removed, so \c "./a//b" names \c "a/b"
     @param encoding the character encoding (default: UTF-8)
 
     @return the file content as a string, or @ref nothing if the file does not exist
@@ -346,12 +348,14 @@ bool GitRepository::isVirtual() [flags=CONSTANT] {
 repo.writeFile("data/image.png", binary_data);
     @endcode
 
-    @param path the file path within the repository
+    @param path the file path within the repository, relative to the working tree; it is normalized as git stores
+    paths: \c "." and empty components are removed, so \c "./a//b" names \c "a/b"
     @param content the binary content to write
 
     @throw GIT-WRITE-ERROR failed to write file
     @throw GIT-PATH-ERROR the path is empty or absolute, has a \c ".." component, names the git directory (\c ".git"
-    in any case), or a directory component of it is a symbolic link or not a directory in the working tree
+    in any case), names no file (its last component is empty or \c "."), or a directory component of it is a symbolic
+    link or not a directory in the working tree
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
 nothing GitRepository::writeFile(string path, binary content) [flags=NAMED_ARGS] {
@@ -367,12 +371,14 @@ nothing GitRepository::writeFile(string path, binary content) [flags=NAMED_ARGS]
 repo.writeFileString("config/db.yaml", "pool_size: 10\n");
     @endcode
 
-    @param path the file path within the repository
+    @param path the file path within the repository, relative to the working tree; it is normalized as git stores
+    paths: \c "." and empty components are removed, so \c "./a//b" names \c "a/b"
     @param content the string content to write
 
     @throw GIT-WRITE-ERROR failed to write file
     @throw GIT-PATH-ERROR the path is empty or absolute, has a \c ".." component, names the git directory (\c ".git"
-    in any case), or a directory component of it is a symbolic link or not a directory in the working tree
+    in any case), names no file (its last component is empty or \c "."), or a directory component of it is a symbolic
+    link or not a directory in the working tree
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
 nothing GitRepository::writeFileString(string path, string content) [flags=NAMED_ARGS] {
@@ -388,10 +394,12 @@ nothing GitRepository::writeFileString(string path, string content) [flags=NAMED
 repo.deleteFile("config/old.yaml");
     @endcode
 
-    @param path the file path within the repository
+    @param path the file path within the repository, relative to the working tree; it is normalized as git stores
+    paths: \c "." and empty components are removed, so \c "./a//b" names \c "a/b"
 
     @throw GIT-PATH-ERROR the path is empty or absolute, has a \c ".." component, names the git directory (\c ".git"
-    in any case), or a directory component of it is a symbolic link or not a directory in the working tree
+    in any case), names no file (its last component is empty or \c "."), or a directory component of it is a symbolic
+    link or not a directory in the working tree
     @throw GIT-DELETE-ERROR the working tree cannot be opened
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
@@ -407,7 +415,8 @@ if (repo.fileExists("config/db.yaml")) {
 }
     @endcode
 
-    @param path the file path within the repository
+    @param path the file path within the repository, relative to the working tree; it is normalized as git stores
+    paths: \c "." and empty components are removed, so \c "./a//b" names \c "a/b"
 
     @return @ref True "True" if the file exists
 
@@ -493,7 +502,8 @@ bool GitRepository::isEmpty() {
 repo.add("file.txt");
     @endcode
 
-    @param path the file path relative to the working directory
+    @param path the file path relative to the working directory; it is normalized as git stores paths: \c "." and
+    empty components are removed, so \c "./a//b" names \c "a/b"
 
     @throw GIT-INDEX-ERROR failed to add file to index
     @throw GIT-REPOSITORY-ERROR repository has been closed
@@ -508,7 +518,8 @@ nothing GitRepository::add(string path) [flags=NAMED_ARGS] {
 repo.unstage("file.txt");
     @endcode
 
-    @param path the file path relative to the working directory
+    @param path the file path relative to the working directory; it is normalized as git stores paths: \c "." and
+    empty components are removed, so \c "./a//b" names \c "a/b"
 
     @throw GIT-INDEX-ERROR failed to remove file from index
     @throw GIT-REPOSITORY-ERROR repository has been closed
@@ -870,6 +881,22 @@ repo.fetch("upstream");      # fetch from named remote
     @throw GIT-REPOSITORY-ERROR repository has been closed
     @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
     @ref Qore::SandboxManager "SandboxManager" network policy
+    @throw FILESYSTEM-ACCESS-DENIED the remote is a local repository whose location the file-system policy of the
+    active @ref Qore::SandboxManager "SandboxManager" does not allow to be read
+
+    @note A remote is a local repository, which libgit2 reads (and writes for a push) with its local transport, if
+    its URL starts with \c file:// (in any case), or if it is a path (it has none of the prefixes \c git://,
+    \c http://, \c https://, \c ssh://, \c ssh+git:// and \c git+ssh://, and it starts with \c "/" or \c ".",
+    has no \c ":", or names an existing file).  The URL that is checked is the one that libgit2 uses, after the
+    \c insteadOf rewriting of the repository's configuration; a push checks both the remote's push URL, if it has
+    one, and its URL, whose repository the local transport writes.  \c file:///path and \c file://localhost/path
+    name \c /path; any other local URL is the path that libgit2 opens as it is given.  The location, the git
+    directory and the object database, references and packed references of the repository there are checked against
+    the file-system policy of an active sandbox, with read access for a fetch (also of a pull and of
+    @ref connectRemote()) and read, write, create and delete access for a push, and the object directories that the
+    alternates of the object database name with read access; this applies also to a repository object that the
+    sandboxed code was lent.  A location that the sandboxed code changes while the operation runs (a directory
+    replaced by a symbolic link after the check) is not covered.
 
     @note When a @ref Qore::SandboxManager "SandboxManager" is active, a
     best-effort pre-flight check resolves the remote host and validates each
@@ -898,6 +925,9 @@ repo.push("origin", "refs/heads/main:refs/heads/main");  # explicit refspec
     @throw GIT-REPOSITORY-ERROR repository has been closed
     @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
     @ref Qore::SandboxManager "SandboxManager" network policy
+    @throw FILESYSTEM-ACCESS-DENIED the remote is a local repository whose location the file-system policy of the
+    active @ref Qore::SandboxManager "SandboxManager" does not allow to be read, written, created and deleted (see
+    @ref GitRepository::fetch() "fetch()")
 
     @note See @ref GitRepository::fetch() "fetch()" for details on the
     best-effort network sandbox pre-flight check.
@@ -1089,6 +1119,9 @@ GitRepository repo = GitRepository::connectRemote("git@github.com:org/repo.git",
     @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
     @ref Qore::SandboxManager "SandboxManager" network policy (see
     @ref GitRepository::fetch() "fetch()")
+    @throw FILESYSTEM-ACCESS-DENIED the remote is a local repository whose location the file-system policy of the
+    active @ref Qore::SandboxManager "SandboxManager" does not allow to be read (see
+    @ref GitRepository::fetch() "fetch()")
 
     @since git 1.0
 */
@@ -1245,6 +1278,9 @@ hash<GitMergeResult> result = repo.pull("origin", {
     @throw GIT-REPOSITORY-ERROR repository has been closed
     @throw NETWORK-ACCESS-DENIED the remote address is blocked by the active
     @ref Qore::SandboxManager "SandboxManager" network policy (see
+    @ref GitRepository::fetch() "fetch()")
+    @throw FILESYSTEM-ACCESS-DENIED the remote is a local repository whose location the file-system policy of the
+    active @ref Qore::SandboxManager "SandboxManager" does not allow to be read (see
     @ref GitRepository::fetch() "fetch()")
 
     @since git 1.0
