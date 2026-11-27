@@ -265,6 +265,21 @@
     printf("Content: %s\n", file.content);
     @endcode
 
+    The provider can also be created by its factory, from its constructor options (\c path or \c virtual):
+
+    @code{.py}
+    %modern
+    %requires DataProvider
+    %requires GitDataProvider
+
+    AbstractDataProvider dp = DataProvider::getFactoryObject("git", {"path": "/path/to/repo"});
+    AbstractDataProvider reader = DataProvider::getFactoryObjectFromString("git{virtual=true}/read-file");
+    @endcode
+
+    A \c path given by code restricted from the \c FILESYSTEM functional domain is refused with
+    \c PERMISSION-DENIED, also through a factory that the host lent to it; a virtual repository stays usable for such
+    code.
+
     @section gitcookbookforge GitForgeHelper (PR/MR)
 
     @code{.py}

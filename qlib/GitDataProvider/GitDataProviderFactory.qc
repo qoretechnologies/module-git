@@ -49,11 +49,6 @@ public class GitDataProviderFactory inherits AbstractDataProviderFactory {
         return cls;
     }
 
-    #! Returns the data provider from the given constructor options
-    private AbstractDataProvider getProviderImpl(hash<auto> constructor_options, *hash<auto> option_overrides) {
-        return new GitDataProvider(constructor_options);
-    }
-
     #! Returns provider info
     private hash<DataProviderInfo> getProviderInfoImpl() {
         return GitDataProvider::ProviderInfo;

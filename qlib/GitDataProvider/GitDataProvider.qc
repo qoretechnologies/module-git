@@ -77,20 +77,26 @@ public class GitDataProvider inherits AbstractDataProvider {
     }
 
     #! Creates the provider from constructor options
-    /** @throw CONSTRUCTOR-ERROR missing or conflicting options
+    /** This is the constructor that the data provider factory (\c DataProvider::getFactoryObject("git", options))
+        creates the provider with.
+
+        @param options the constructor options (see ConstructorOptions)
+
+        @throw CONSTRUCTOR-ERROR missing or conflicting options
         @throw PERMISSION-DENIED a \c path is given and the creating code is restricted from the \c FILESYSTEM
-        functional domain
+        functional domain, also when it creates the provider with a factory that it was lent
     */
-    constructor(hash<auto> options) {
+    constructor(*hash<auto> options) {
         *hash<auto> copts = checkOptions("CONSTRUCTOR-ERROR", ConstructorOptions, options);
         if (copts.path && copts.virtual) {
             throw "CONSTRUCTOR-ERROR", "'path' and 'virtual' options are mutually exclusive";
         }
         if (copts.path) {
             # the path is the creator's: library code runs with its own Program's options, so the creating code is
-            # refused before the path is used if it is restricted from the file system; a provider that a lent
-            # connection creates with the host's repository keeps it
-            if (SandboxManager::isCallerRestricted(DOM_FILESYSTEM)) {
+            # refused before the path is used if it is restricted from the file system, also when it creates the
+            # provider with a factory that the host created and lent to it, as the path is its input (a provider that
+            # a lent connection creates gets the host's repository, not a path)
+            if (SandboxManager::isLentToRestricted(DOM_FILESYSTEM)) {
                 throw "PERMISSION-DENIED", "the 'path' option cannot be used: the calling code is restricted from the "
                     "FILESYSTEM functional domain";
             }
