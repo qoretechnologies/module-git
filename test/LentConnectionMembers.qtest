@@ -41,7 +41,8 @@
     connection is lent to can change.  Code restricted from a functional domain of the connection (PO_NO_FILESYSTEM,
     PO_NO_NETWORK) that changed them is refused with PERMISSION-DENIED before a repository is opened, also through
     the connection's data provider, so it cannot read or write another repository through the connection; with the
-    members that the host gave, the connection works for it.  Unrestricted code that is lent the connection uses the
+    members that the host gave, the connection works for it.  The file-system policy of a sandbox applies to the
+    repository that sandboxed code points the connection to.  Unrestricted code that is lent the connection uses the
     members that it set.
 */
 class LentConnectionMembersTest inherits QUnit::Test {
@@ -143,6 +144,12 @@ auto sub get_repo(AbstractConnection conn, string url) {
                 "write other URL " + desc);
             assertFalse(is_file(other_repo + "/stolen.txt"), "nothing written " + desc);
         }
+        # a sandbox is not a restriction of a functional domain: its file-system policy applies to the repository
+        # that a borrower points the connection to
+        assertEq("host\n", getProgram("sandbox", mode).callFunction("read", getConnection()), "host's URL sandbox "
+            + mode);
+        assertEq("FILESYSTEM-ACCESS-DENIED", getProgram("sandbox", mode).callFunction("read", getConnection(),
+            other_url), "other URL sandbox " + mode);
         # unrestricted code that is lent the connection uses the members that it set
         assertEq("other\n", getProgram("unrestricted", mode).callFunction("read", getConnection(), other_url),
             "unrestricted " + mode);
@@ -191,6 +198,14 @@ auto sub get_repo(AbstractConnection conn, string url) {
             case "nonet":
                 p = new Program(PO_NEW_STYLE | PO_NO_NETWORK);
                 break;
+            case "sandbox": {
+                SandboxManager sm();
+                sm.setFilesystemDefaultPolicy(False);
+                sm.addFilesystemAllowedPath(host_repo, QSEC_ALL);
+                p = new Program(PO_NEW_STYLE);
+                p.setSandboxManager(sm);
+                break;
+            }
             default:
                 p = new Program(PO_NEW_STYLE);
                 break;

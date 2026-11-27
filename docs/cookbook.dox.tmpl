@@ -113,8 +113,8 @@
 
     A remote whose URL is a local path or a \c file:// URL is read and written by libgit2 directly: for sandboxed
     code, its location must be allowed by the file-system policy of the sandbox (read access for a fetch, a pull and
-    @ref Qore::Git::GitRepository::connectRemote() "connectRemote()", read and write access for a push), or the
-    operation is refused with \c FILESYSTEM-ACCESS-DENIED before the remote is opened (see
+    @ref Qore::Git::GitRepository::connectRemote() "connectRemote()", read, write, create and delete access for a
+    push), or the operation is refused with \c FILESYSTEM-ACCESS-DENIED before the remote is opened (see
     @ref Qore::Git::GitRepository::fetch() "fetch()").
 
     @section gitcookbookmerge Merge with Conflict Resolution

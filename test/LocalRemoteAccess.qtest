@@ -36,9 +36,12 @@
 #! Tests that local remotes are checked against the file-system restrictions of the caller (module-git#9)
 /** A remote whose URL is a local path or a \c file:// URL is read (fetch, pull, connectRemote()) and written (push)
     by libgit2 with its local transport.  Sandboxed code whose sandbox denies the file system by default can use only
-    the remotes in the locations that its sandbox allows: read access for a fetch, read and write access for a push,
-    also when the URL is rewritten by the repository's configuration (\c insteadOf, \c pushurl), and when the location
-    is a working tree whose \c .git file names a git directory elsewhere; other remotes are refused with
+    the remotes in the locations that its sandbox allows: read access for a fetch, read, write, create and delete access
+    for a push, also when the URL is rewritten by the repository's configuration (\c insteadOf, \c pushurl), when
+    the location is a working tree whose \c .git file names a git directory elsewhere, when the alternates of the
+    repository's object database name other object directories, and when its references or objects are symbolic
+    links elsewhere; local URLs are checked as libgit2 opens them (upper-case \c FILE:// URLs and relative paths as
+    paths relative to the current directory); other remotes are refused with
     FILESYSTEM-ACCESS-DENIED before libgit2 opens them, and nothing is written to them, also with a repository that
     the sandboxed code was lent; unrestricted code uses any.
 */
@@ -115,6 +118,16 @@ string sub connect(string url) {
         hash<string, string> bare;
         #! a working tree in an allowed location whose .git file names the denied remote's git directory
         string redirect;
+        #! a repository in the allowed location whose alternates name the denied remote's object database
+        string alternates;
+        #! the same with a relative alternates entry
+        string relative_alternates;
+        #! a repository in the allowed location whose alternates name the alternates repository
+        string nested_alternates;
+        #! a bare repository in the allowed location whose refs directory is a symbolic link to the denied one's
+        string symlinked_refs;
+        #! a bare repository in the allowed location whose objects directory is a symbolic link to the denied one's
+        string symlinked_objects;
         #! the location of the repositories of the sandboxed code
         string work;
         #! a counter for unique names
@@ -130,10 +143,26 @@ string sub connect(string url) {
         denied = makeRepo(dir + "/denied/remote", "denied\n");
         allowed = makeRepo(dir + "/allowed/remote", "allowed\n");
         readonly = makeRepo(dir + "/ro/remote", "readonly\n");
-        foreach string loc in ("denied", "allowed", "ro") {
+        mkdir(dir + "/rw");
+        foreach string loc in ("denied", "allowed", "ro", "rw") {
             bare{loc} = sprintf("%s/%s/bare.git", dir, loc);
             Git::GitRepository::init(bare{loc}, True);
         }
+        # repositories in the allowed location whose object database or references are elsewhere
+        alternates = makeRepo(dir + "/allowed/alternates", "alternates\n");
+        writeFile(alternates + "/.git/objects/info/alternates", "# comment\n\n" + denied + "/.git/objects\n");
+        relative_alternates = makeRepo(dir + "/allowed/relative-alternates", "relative\n");
+        writeFile(relative_alternates + "/.git/objects/info/alternates", "../../../../denied/remote/.git/objects\n");
+        nested_alternates = makeRepo(dir + "/allowed/nested-alternates", "nested\n");
+        writeFile(nested_alternates + "/.git/objects/info/alternates", alternates + "/.git/objects\n");
+        symlinked_refs = dir + "/allowed/symlinked-refs.git";
+        Git::GitRepository::init(symlinked_refs, True);
+        remove_tree(symlinked_refs + "/refs");
+        symlink(bare.denied + "/refs", symlinked_refs + "/refs");
+        symlinked_objects = dir + "/allowed/symlinked-objects.git";
+        Git::GitRepository::init(symlinked_objects, True);
+        remove_tree(symlinked_objects + "/objects");
+        symlink(bare.denied + "/objects", symlinked_objects + "/objects");
         redirect = dir + "/allowed/redirect";
         mkdir(redirect);
         File f();
@@ -160,15 +189,24 @@ string sub connect(string url) {
     private testFetch(string mode) {
         Program p = getProgram("sandbox", mode);
         foreach string url in (denied, "file://" + denied, "file://localhost" + denied, "file://" + denied + "/.git",
-                "file://" + replace(denied, "/", "%2f"), dir + "/allowed/../denied/remote", redirect) {
+                "file://" + regex_subst(denied, "/remote$", "/%72emote"), dir + "/allowed/../denied/remote", redirect,
+                getRelativePath(denied), "FILE://" + denied, "file://LOCALHOST" + denied, "File://" + allowed,
+                alternates, "file://" + relative_alternates, nested_alternates, symlinked_objects) {
             assertEq("FILESYSTEM-ACCESS-DENIED", p.callFunction("fetch", getWorkRepo(p), "r", url),
                 sprintf("fetch %y %s", url, mode));
         }
         # the URL that libgit2 uses after the rewriting of the repository's configuration
         assertEq("FILESYSTEM-ACCESS-DENIED", p.callFunction("fetch", getWorkRepo(p), "r", "alias://remote",
             {sprintf("url.file://%s/.insteadOf", dir + "/denied"): "alias://"}), "fetch insteadOf " + mode);
+        # the sandboxed code changes the URL of a remote itself
+        assertEq("FILESYSTEM-ACCESS-DENIED", p.callFunction("fetch", getWorkRepo(p), "r", allowed,
+            {"remote.r.url": denied}), "fetch changed url " + mode);
+        # a network remote is still checked against the network policy
+        assertEq("NETWORK-ACCESS-DENIED", p.callFunction("fetch", getWorkRepo(p), "r",
+            "https://nonexistent.invalid/repo.git"), "fetch network " + mode);
         # the remotes in allowed locations
-        foreach string url in (allowed, "file://" + allowed, readonly, "file://" + readonly) {
+        foreach string url in (allowed, "file://" + allowed, readonly, "file://" + readonly,
+                getRelativePath(allowed)) {
             assertEq("ok", p.callFunction("fetch", getWorkRepo(p), "r", url), sprintf("fetch %y %s", url, mode));
         }
         # a remote of a lent repository
@@ -191,6 +229,14 @@ string sub connect(string url) {
                     "result": "FILESYSTEM-ACCESS-DENIED", "remote": bare.denied},
                 {"url": "alias://bare.git", "config": {sprintf("url.%s/.pushInsteadOf", dir + "/denied"): "alias://"},
                     "result": "FILESYSTEM-ACCESS-DENIED", "remote": bare.denied},
+                # the local transport writes the repository of the URL, not of the push URL
+                {"url": bare.denied, "config": {"remote.r.pushurl": bare.allowed},
+                    "result": "FILESYSTEM-ACCESS-DENIED", "remote": bare.denied},
+                # a location that may be read and written, but in which no file may be created
+                {"url": bare.rw, "result": "FILESYSTEM-ACCESS-DENIED", "remote": bare.rw},
+                # references and objects that are symbolic links to the denied repository's
+                {"url": symlinked_refs, "result": "FILESYSTEM-ACCESS-DENIED", "remote": bare.denied},
+                {"url": symlinked_objects, "result": "FILESYSTEM-ACCESS-DENIED", "remote": bare.denied},
             )) {
             string branch = sprintf("pushed-%s-%d", mode, ++n);
             string desc = sprintf("push %y %y %s", i.url, i.config, mode);
@@ -219,6 +265,19 @@ string sub connect(string url) {
         assertEq("ok", p.callFunction("pull", repo, "origin"), "pull allowed " + mode);
         repo.configSet("remote.origin.url", denied);
         assertEq("FILESYSTEM-ACCESS-DENIED", p.callFunction("pull", repo, "origin"), "pull denied " + mode);
+    }
+
+    #! returns a path relative to the current directory that names the given absolute path
+    private string getRelativePath(string path) {
+        int depth = (select getcwd().split("/"), $1.val()).size();
+        return strmul("../", depth) + path.substr(1);
+    }
+
+    #! writes a file
+    private writeFile(string path, string content) {
+        File f();
+        f.open2(path, O_CREAT | O_WRONLY | O_TRUNC);
+        f.write(content);
     }
 
     #! returns the branches of a repository
@@ -283,6 +342,7 @@ string sub connect(string url) {
                 sm.addFilesystemAllowedPath(dir + "/allowed", QSEC_ALL);
                 sm.addFilesystemAllowedPath(dir + "/work", QSEC_ALL);
                 sm.addFilesystemAllowedPath(dir + "/ro", QSEC_READ);
+                sm.addFilesystemAllowedPath(dir + "/rw", QSEC_READ | QSEC_WRITE);
                 p = new Program(PO_NEW_STYLE);
                 p.setSandboxManager(sm);
                 break;
