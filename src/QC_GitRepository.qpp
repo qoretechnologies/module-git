@@ -350,6 +350,8 @@ repo.writeFile("data/image.png", binary_data);
     @param content the binary content to write
 
     @throw GIT-WRITE-ERROR failed to write file
+    @throw GIT-PATH-ERROR the path is empty or absolute, has a \c ".." component, names the git directory (\c ".git"
+    in any case), or a directory component of it is a symbolic link or not a directory in the working tree
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
 nothing GitRepository::writeFile(string path, binary content) [flags=NAMED_ARGS] {
@@ -369,6 +371,8 @@ repo.writeFileString("config/db.yaml", "pool_size: 10\n");
     @param content the string content to write
 
     @throw GIT-WRITE-ERROR failed to write file
+    @throw GIT-PATH-ERROR the path is empty or absolute, has a \c ".." component, names the git directory (\c ".git"
+    in any case), or a directory component of it is a symbolic link or not a directory in the working tree
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
 nothing GitRepository::writeFileString(string path, string content) [flags=NAMED_ARGS] {
@@ -386,6 +390,9 @@ repo.deleteFile("config/old.yaml");
 
     @param path the file path within the repository
 
+    @throw GIT-PATH-ERROR the path is empty or absolute, has a \c ".." component, names the git directory (\c ".git"
+    in any case), or a directory component of it is a symbolic link or not a directory in the working tree
+    @throw GIT-DELETE-ERROR the working tree cannot be opened
     @throw GIT-REPOSITORY-ERROR repository has been closed
 */
 nothing GitRepository::deleteFile(string path) [flags=NAMED_ARGS] {
