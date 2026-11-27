@@ -1,0 +1,238 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  CallerFileAccess.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%prepend-module-path "${SCRIPT_DIR}/../build"
+%prepend-module-path "${SCRIPT_DIR}/../qlib"
+
+%requires git >= 1.0
+%requires FsUtil
+%requires DataProvider
+%requires GitDataProvider
+%requires GitConnections
+%requires QUnit
+
+%exec-class CallerFileAccessTest
+
+#! Tests that a repository path given by a restricted caller is refused before it is used (module-git#6)
+/** Library code runs with its own Program's options, so the git data provider refuses the \c path option of code
+    restricted from the file system: a Program with PO_NO_FILESYSTEM is refused with PERMISSION-DENIED before the
+    repository is opened, a Program whose sandbox denies the file system by default is refused by its file-system
+    policy (FILESYSTEM-ACCESS-DENIED).  A virtual repository is not a path and stays usable for restricted code; the
+    repository of a connection or a provider that the host created is the host's and is used for restricted code that
+    it is lent to, and the repository paths of the requests stay confined to the working tree; an unrestricted caller
+    uses its path.
+*/
+class CallerFileAccessTest inherits QUnit::Test {
+    private {
+        const Modes = {"ast": EM_AST, "ir": EM_IR, "jit": EM_JIT, "tiered": EM_TIERED};
+
+        const Source = "%modern
+%requires DataProvider
+%requires GitDataProvider
+%requires GitConnections
+
+# creates a git data provider with the given options and reads a file with it
+string sub create(hash<auto> opts) {
+    try {
+        GitDataProvider dp(opts);
+        dp.getChildProviderEx(\"list-files\").doRequest({});
+        return \"ok\";
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+# reads a file with a data provider that the host created
+string sub read(AbstractDataProvider dp, string path) {
+    try {
+        hash<auto> rv = dp.getChildProviderEx(\"read-file\").doRequest({\"path\": path});
+        return rv.content ?? \"\";
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+# writes a file with a data provider that the host created
+string sub write(AbstractDataProvider dp, string path) {
+    try {
+        dp.getChildProviderEx(\"write-file\").doRequest({\"path\": path, \"content\": \"x\"});
+        return \"ok\";
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+# reads a file with the data provider of a connection that the host created
+string sub read_conn(AbstractConnection conn, string path) {
+    try {
+        return read(conn.getDataProvider(), path);
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+";
+    }
+
+    private {
+        #! the directory of the test
+        string dir;
+        #! the path of a repository with one committed file
+        string repo_path;
+    }
+
+    constructor() : QUnit::Test("CallerFileAccess", "1.0", \ARGV) {
+        dir = make_tmp_dir("git-caller-file-access-");
+        repo_path = dir + "/repo";
+        Git::GitRepository repo = Git::GitRepository::init(repo_path);
+        repo.writeFileString("file.txt", "content\n");
+        repo.add("file.txt");
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@example.com");
+        repo.commit("initial");
+
+        foreach string mode in (keys Modes) {
+            string m = mode;
+            addTestCase("path option, " + m, sub () { testPathOption(m); });
+            addTestCase("lent objects, " + m, sub () { testLent(m); });
+            addTestCase("repository file paths, " + m, sub () { testRepoPaths(m); });
+        }
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (dir) {
+            remove_tree(dir);
+        }
+    }
+
+    private testPathOption(string mode) {
+        foreach string path in ((repo_path, "/etc")) {
+            hash<auto> opts = {"path": path};
+            assertEq("PERMISSION-DENIED", getProgram("nofs", mode).callFunction("create", opts),
+                sprintf("nofs %y %s", path, mode));
+            # the sandbox refuses by its file-system policy when the repository is opened
+            assertEq("FILESYSTEM-ACCESS-DENIED", getProgram("sandbox", mode).callFunction("create", opts),
+                sprintf("sandbox %y %s", path, mode));
+        }
+        # an unrestricted caller opens its repository
+        assertEq("ok", getProgram("unrestricted", mode).callFunction("create", {"path": repo_path}),
+            "unrestricted " + mode);
+        # a virtual repository is not a path
+        foreach string kind in ("nofs", "sandbox") {
+            assertEq("ok", getProgram(kind, mode).callFunction("create", {"virtual": True}),
+                sprintf("%s virtual %s", kind, mode));
+        }
+    }
+
+    private testLent(string mode) {
+        Program p = getProgram("nofs", mode);
+        # the repository of a provider that the host created
+        GitDataProvider dp({"path": repo_path});
+        assertEq("content\n", p.callFunction("read", dp, "file.txt"), "nofs lent provider " + mode);
+        # the repository paths of a request stay in the working tree
+        foreach string path in (("../../../../../../etc/hostname", "/etc/hostname")) {
+            assertEq("GIT-PATH-ERROR", p.callFunction("read", dp, path), sprintf("nofs lent provider %y %s", path,
+                mode));
+        }
+        # the git directory and the directories that a symbolic link in the working tree names are not part of the
+        # working tree
+        string outside = dir + "/outside-" + mode;
+        mkdir(outside);
+        symlink(outside, repo_path + "/ln");
+        on_exit unlink(repo_path + "/ln");
+        symlink(outside + "/target", repo_path + "/ln-file");
+        on_exit unlink(repo_path + "/ln-file");
+        foreach string path in ((".git/config", ".GIT/config", ".git./config", "git~1/config", "sub/.git/hooks/x",
+                ".git", "ln/x.txt", "ln/sub/x.txt", "ln/")) {
+            assertEq("GIT-PATH-ERROR", p.callFunction("write", dp, path), sprintf("nofs lent write %y %s", path,
+                mode));
+            # a refused write leaves no content (a path that is not valid cannot be read either)
+            assertRegex("^(|GIT-PATH-ERROR)$", p.callFunction("read", dp, path), sprintf("nofs lent write %y, nothing kept %s", path,
+                mode));
+        }
+        # a symbolic link as the last component is not written through
+        assertEq("GIT-WRITE-ERROR", p.callFunction("write", dp, "ln-file"), "nofs lent write final symlink " + mode);
+        assertFalse(is_file(outside + "/target"), "nothing written through the final symlink " + mode);
+        Dir d();
+        d.chdir(outside);
+        assertEq((), d.list() ?? (), "nothing written outside " + mode);
+        assertNothing(stat(outside + "/sub"), "no directory created outside " + mode);
+        # a file in a new directory of the working tree
+        assertEq("ok", p.callFunction("write", dp, "new/dir/x.txt"), "nofs lent write new directory " + mode);
+        assertEq("x", ReadOnlyFile::readTextFile(repo_path + "/new/dir/x.txt"), "written " + mode);
+
+        # the repository of a connection that the host created
+        GitConnection conn("t", "", "gitlocal://" + repo_path);
+        assertEq("content\n", p.callFunction("read_conn", conn, "file.txt"), "nofs lent connection " + mode);
+    }
+
+    #! the working-tree paths of GitRepository stay in the working tree for deletes too
+    private testRepoPaths(string mode) {
+        string path = dir + "/paths-" + mode;
+        Git::GitRepository repo = Git::GitRepository::init(path);
+        string outside = dir + "/victim-" + mode;
+        mkdir(outside);
+        File f();
+        f.open2(outside + "/victim", O_CREAT | O_WRONLY | O_TRUNC);
+        f.write("v");
+        symlink(outside, path + "/ln");
+        on_exit unlink(path + "/ln");
+        assertThrows("GIT-PATH-ERROR", \repo.deleteFile(), "ln/victim");
+        assertTrue(is_file(outside + "/victim"), "the target outside survives " + mode);
+        # a missing file and a missing directory are no-ops
+        repo.deleteFile("missing.txt");
+        repo.deleteFile("missing/file.txt");
+        # a file in a new directory, then deleted
+        repo.writeFileString("a/b/c.txt", "c");
+        assertEq("c", ReadOnlyFile::readTextFile(path + "/a/b/c.txt"));
+        repo.deleteFile("a/b/c.txt");
+        assertFalse(is_file(path + "/a/b/c.txt"));
+        assertThrows("GIT-PATH-ERROR", \repo.writeFileString(), (".git/config", "x"));
+    }
+
+    #! returns a Program of the given kind
+    private Program getProgram(string kind, string mode) {
+        Program p;
+        switch (kind) {
+            case "nofs":
+                p = new Program(PO_NEW_STYLE | PO_NO_FILESYSTEM);
+                break;
+            case "sandbox": {
+                SandboxManager sm();
+                sm.setFilesystemDefaultPolicy(False);
+                p = new Program(PO_NEW_STYLE);
+                p.setSandboxManager(sm);
+                break;
+            }
+            default:
+                p = new Program(PO_NEW_STYLE);
+                break;
+        }
+        p.setExecMode(Modes{mode});
+        p.parse(Source, kind);
+        return p;
+    }
+}

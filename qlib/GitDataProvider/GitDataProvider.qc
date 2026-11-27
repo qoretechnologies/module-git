@@ -78,6 +78,8 @@ public class GitDataProvider inherits AbstractDataProvider {
 
     #! Creates the provider from constructor options
     /** @throw CONSTRUCTOR-ERROR missing or conflicting options
+        @throw PERMISSION-DENIED a \c path is given and the creating code is restricted from the \c FILESYSTEM
+        functional domain
     */
     constructor(hash<auto> options) {
         *hash<auto> copts = checkOptions("CONSTRUCTOR-ERROR", ConstructorOptions, options);
@@ -85,6 +87,13 @@ public class GitDataProvider inherits AbstractDataProvider {
             throw "CONSTRUCTOR-ERROR", "'path' and 'virtual' options are mutually exclusive";
         }
         if (copts.path) {
+            # the path is the creator's: library code runs with its own Program's options, so the creating code is
+            # refused before the path is used if it is restricted from the file system; a provider that a lent
+            # connection creates with the host's repository keeps it
+            if (SandboxManager::isCallerRestricted(DOM_FILESYSTEM)) {
+                throw "PERMISSION-DENIED", "the 'path' option cannot be used: the calling code is restricted from the "
+                    "FILESYSTEM functional domain";
+            }
             repo = new Git::GitRepository(copts.path);
         } else if (copts.virtual) {
             repo = Git::GitRepository::createVirtual();

@@ -38,6 +38,8 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <strings.h>
+#include <unistd.h>
 
 //! nftw callback for best-effort recursive directory removal
 static int qore_git_rm_cb(const char* path, const struct stat*, int, struct FTW*) {
@@ -55,9 +57,22 @@ static bool checkFsAccess(const char* path, int mode, ExceptionSink* xsink) {
     return true;
 }
 
+//! Returns true if a path component names the repository's git directory
+/** Matches \c ".git" case-insensitively, also with the trailing dots and spaces that some file systems ignore, and
+    its 8.3 short name \c "git~1", so that no repository-relative path can reach the git directory (its
+    configuration, hooks and objects) through the working tree
+*/
+static bool isGitDirComponent(const char* p, size_t len) {
+    while (len && (p[len - 1] == '.' || p[len - 1] == ' ')) {
+        --len;
+    }
+    return (len == 4 && !strncasecmp(p, ".git", 4)) || (len == 5 && !strncasecmp(p, "git~1", 5));
+}
+
 //! Validates a repository-relative path
-/** Rejects empty paths, absolute paths, and any ".." path component to prevent escaping
-    the repository working tree (path traversal). This is enforced unconditionally, i.e.
+/** Rejects empty paths, absolute paths, any ".." path component to prevent escaping
+    the repository working tree (path traversal), and any component that names the git
+    directory (see isGitDirComponent()). This is enforced unconditionally, i.e.
     independently of whether a QoreSandboxManager is active, since the sandbox check is a
     no-op when no sandbox manager is installed.
 
@@ -83,12 +98,110 @@ static bool validateRepoPath(const char* path, ExceptionSink* xsink) {
                 "path traversal (\"..\") is not allowed in path '%s'", path);
             return false;
         }
+        if (isGitDirComponent(p, len)) {
+            xsink->raiseException("GIT-PATH-ERROR",
+                "path '%s' names the git directory, which is not part of the working tree", path);
+            return false;
+        }
         if (!slash) {
             break;
         }
         p = slash + 1;
     }
     return true;
+}
+
+//! Closes a file descriptor when it goes out of scope
+class QoreGitFdHelper {
+public:
+    DLLLOCAL QoreGitFdHelper(int fd = -1) : fd(fd) {
+    }
+
+    QoreGitFdHelper(const QoreGitFdHelper&) = delete;
+    QoreGitFdHelper& operator=(const QoreGitFdHelper&) = delete;
+
+    DLLLOCAL ~QoreGitFdHelper() {
+        reset(-1);
+    }
+
+    DLLLOCAL void reset(int new_fd) {
+        if (fd >= 0) {
+            ::close(fd);
+        }
+        fd = new_fd;
+    }
+
+    DLLLOCAL int get() const {
+        return fd;
+    }
+
+    DLLLOCAL int release() {
+        int rv = fd;
+        fd = -1;
+        return rv;
+    }
+
+private:
+    int fd;
+};
+
+//! Opens the directory below the working tree that holds the last component of a validated repository-relative path
+/** Every intermediate component is opened relative to its parent without following a symbolic link, so that a
+    symbolic link in the working tree (to a directory outside of it) cannot be used to write or delete outside of the
+    repository; the working tree directory itself is the repository's and is opened as it is.
+
+    @param workdir the working tree directory
+    @param path the validated repository-relative path
+    @param create if true, missing intermediate directories are created
+    @param last the last component of \a path
+    @param missing_ok if true, a missing intermediate directory returns -1 without an exception
+
+    @return the directory descriptor, or -1 (with an exception raised unless the directory is missing and
+    \a missing_ok is true)
+*/
+static int openRepoParentDir(const char* workdir, const char* path, bool create, std::string& last, bool missing_ok,
+        ExceptionSink* xsink) {
+    QoreGitFdHelper dfd(::open(workdir, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (dfd.get() < 0) {
+        xsink->raiseException(create ? "GIT-WRITE-ERROR" : "GIT-DELETE-ERROR", "failed to open the working tree '%s': %s", workdir,
+            strerror(errno));
+        return -1;
+    }
+    std::string p(path);
+    size_t start = 0;
+    while (true) {
+        size_t slash = p.find('/', start);
+        if (slash == std::string::npos) {
+            last = p.substr(start);
+            break;
+        }
+        std::string comp = p.substr(start, slash - start);
+        start = slash + 1;
+        if (comp.empty() || comp == ".") {
+            continue;
+        }
+        if (create && mkdirat(dfd.get(), comp.c_str(), 0755) && errno != EEXIST) {
+            xsink->raiseException("GIT-WRITE-ERROR", "failed to create directory '%s' for path '%s': %s",
+                comp.c_str(), path, strerror(errno));
+            return -1;
+        }
+        int nfd = openat(dfd.get(), comp.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (nfd < 0) {
+            if (missing_ok && errno == ENOENT) {
+                return -1;
+            }
+            xsink->raiseException("GIT-PATH-ERROR", "path '%s' cannot be used: its component '%s' is not a "
+                "directory of the working tree (a symbolic link is not followed): %s", path, comp.c_str(),
+                strerror(errno));
+            return -1;
+        }
+        dfd.reset(nfd);
+    }
+    if (last.empty() || last == ".") {
+        xsink->raiseException("GIT-PATH-ERROR", "path '%s' does not name a file", path);
+        return -1;
+    }
+    return dfd.release();
 }
 
 //! Validates a remote URL
@@ -798,9 +911,6 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
         return git_raise_exception(xsink, "GIT-WRITE-ERROR", rc, "failed to create blob from buffer");
     }
 
-    // Track in virtual tree
-    m_virtual_tree[path] = blob_oid;
-
     // If in disk mode, also write the file to the working directory and stage it
     if (!m_virtual) {
         const char* workdir = git_repository_workdir(m_repo);
@@ -812,23 +922,15 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
                 return -1;
             }
 
-            // Ensure parent directory exists
-            std::string dir = full_path.substr(0, full_path.rfind('/'));
-            if (!dir.empty()) {
-                // Simple mkdir -p equivalent
-                std::string accum;
-                for (size_t i = 0; i < dir.size(); ++i) {
-                    accum += dir[i];
-                    if (dir[i] == '/' || i == dir.size() - 1) {
-                        mkdir(accum.c_str(), 0755);
-                    }
-                }
+            // create the parent directories and open the file relative to them without following a symlink in any
+            // component (O_NOFOLLOW for the last one), so a symlink planted in the working tree cannot be used to
+            // write an arbitrary file outside the repository
+            std::string last;
+            QoreGitFdHelper dfd(openRepoParentDir(workdir, path, true, last, false, xsink));
+            if (dfd.get() < 0) {
+                return -1;
             }
-
-            // O_NOFOLLOW: refuse to write through a symlink at the final path
-            // component, so a symlink planted in the working tree cannot be used
-            // to overwrite an arbitrary file outside the repository
-            int fd = open(full_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+            int fd = openat(dfd.get(), last.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
             if (fd < 0) {
                 xsink->raiseException("GIT-WRITE-ERROR",
                     "failed to open file '%s' for writing: %s",
@@ -863,6 +965,9 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
         }
     }
 
+    // track in the virtual tree only once the file is written, so a refused or failed write leaves no content
+    m_virtual_tree[path] = blob_oid;
+
     return 0;
 }
 
@@ -893,7 +998,15 @@ int QoreGitRepository::deleteFile(const char* path, ExceptionSink* xsink) {
             if (!checkFsAccess(full_path.c_str(), QSEC_DELETE, xsink)) {
                 return -1;
             }
-            ::remove(full_path.c_str());
+            // remove the file relative to its parent directories without following a symlink in any component
+            std::string last;
+            QoreGitFdHelper dfd(openRepoParentDir(workdir, path, false, last, true, xsink));
+            if (*xsink) {
+                return -1;
+            }
+            if (dfd.get() >= 0 && unlinkat(dfd.get(), last.c_str(), 0) && (errno == EISDIR || errno == EPERM)) {
+                unlinkat(dfd.get(), last.c_str(), AT_REMOVEDIR);
+            }
         }
         git_index* index = nullptr;
         int rc = git_repository_index(&index, m_repo);
