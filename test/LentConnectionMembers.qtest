@@ -1,0 +1,202 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  LentConnectionMembers.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%prepend-module-path "${SCRIPT_DIR}/../build"
+%prepend-module-path "${SCRIPT_DIR}/../qlib"
+
+%requires git >= 1.0
+%requires FsUtil
+%requires DataProvider
+%requires GitDataProvider
+%requires GitConnections
+%requires QUnit
+
+%exec-class LentConnectionMembersTest
+
+#! Tests that restricted code that a host-created git connection is lent to cannot redirect it (module-git#8)
+/** A GitConnection opens its repository from its public members (\c url, \c urlh), which the code that the
+    connection is lent to can change.  Code restricted from a functional domain of the connection (PO_NO_FILESYSTEM,
+    PO_NO_NETWORK) that changed them is refused with PERMISSION-DENIED before a repository is opened, also through
+    the connection's data provider, so it cannot read or write another repository through the connection; with the
+    members that the host gave, the connection works for it.  Unrestricted code that is lent the connection uses the
+    members that it set.
+*/
+class LentConnectionMembersTest inherits QUnit::Test {
+    private {
+        const Modes = {"ast": EM_AST, "ir": EM_IR, "jit": EM_JIT, "tiered": EM_TIERED};
+
+        const Source = "%modern
+%requires DataProvider
+%requires GitDataProvider
+%requires GitConnections
+
+# points a lent connection to another URL, if given, and reads a file through its data provider
+string sub read(AbstractConnection conn, *string url, *bool parsed_only) {
+    try {
+        if (url) {
+            if (!parsed_only) {
+                conn.url = url;
+            }
+            conn.urlh = parse_url(url);
+        }
+        hash<auto> rv = conn.getDataProvider().getChildProviderEx(\"read-file\").doRequest({\"path\": \"file.txt\"});
+        return rv.content ?? \"\";
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+# points a lent connection to another URL and writes a file through its data provider
+string sub write(AbstractConnection conn, string url) {
+    try {
+        conn.url = url;
+        conn.urlh = parse_url(url);
+        conn.getDataProvider().getChildProviderEx(\"write-file\").doRequest({\"path\": \"stolen.txt\",
+            \"content\": \"x\"});
+        return \"ok\";
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+
+# points a lent connection to another URL and opens its repository; returns the repository or the error
+auto sub get_repo(AbstractConnection conn, string url) {
+    try {
+        conn.url = url;
+        conn.urlh = parse_url(url);
+        return conn.get();
+    } catch (hash<ExceptionInfo> ex) {
+        return ex.err;
+    }
+}
+";
+    }
+
+    private {
+        #! the directory of the test
+        string dir;
+        #! the host's repository
+        string host_repo;
+        #! another repository
+        string other_repo;
+    }
+
+    constructor() : QUnit::Test("LentConnectionMembers", "1.0", \ARGV) {
+        dir = make_tmp_dir("git-lent-connection-");
+        host_repo = makeRepo("host", "host\n");
+        other_repo = makeRepo("other", "other\n");
+
+        foreach string mode in (keys Modes) {
+            string m = mode;
+            addTestCase("data provider, " + m, sub () { testDataProvider(m); });
+            addTestCase("get, " + m, sub () { testGet(m); });
+        }
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (dir) {
+            remove_tree(dir);
+        }
+    }
+
+    private testDataProvider(string mode) {
+        string other_url = "gitlocal://" + other_repo;
+        foreach string kind in ("nofs", "nonet") {
+            string desc = sprintf("%s %s", kind, mode);
+            # with the URL that the host gave, the connection works for the borrower
+            assertEq("host\n", getProgram(kind, mode).callFunction("read", getConnection()), "host's URL " + desc);
+            # the borrower cannot point it to another repository
+            assertEq("PERMISSION-DENIED", getProgram(kind, mode).callFunction("read", getConnection(), other_url),
+                "other URL " + desc);
+            # ... also by changing only the parsed URL
+            assertEq("PERMISSION-DENIED", getProgram(kind, mode).callFunction("read", getConnection(), other_url,
+                True), "other parsed URL " + desc);
+            # ... nor make it a virtual repository
+            assertEq("PERMISSION-DENIED", getProgram(kind, mode).callFunction("read", getConnection(),
+                "gitvirtual://x"), "virtual " + desc);
+            # ... nor write to another repository
+            assertEq("PERMISSION-DENIED", getProgram(kind, mode).callFunction("write", getConnection(), other_url),
+                "write other URL " + desc);
+            assertFalse(is_file(other_repo + "/stolen.txt"), "nothing written " + desc);
+        }
+        # unrestricted code that is lent the connection uses the members that it set
+        assertEq("other\n", getProgram("unrestricted", mode).callFunction("read", getConnection(), other_url),
+            "unrestricted " + mode);
+        # the host can change its own connection
+        GitConnection conn = getConnection();
+        conn.url = other_url;
+        conn.urlh = parse_url(other_url);
+        assertEq("other\n", conn.getDataProvider().getChildProviderEx("read-file").doRequest({"path": "file.txt"})
+            .content, "host " + mode);
+    }
+
+    private testGet(string mode) {
+        string other_url = "gitlocal://" + other_repo;
+        foreach string kind in ("nofs", "nonet") {
+            assertEq("PERMISSION-DENIED", getProgram(kind, mode).callFunction("get_repo", getConnection(), other_url),
+                sprintf("%s %s", kind, mode));
+        }
+        Git::GitRepository repo = getProgram("unrestricted", mode).callFunction("get_repo", getConnection(),
+            other_url);
+        assertEq("other\n", repo.readFileString("file.txt"), "unrestricted " + mode);
+    }
+
+    #! returns a connection to the host's repository that the host created
+    private GitConnection getConnection() {
+        return new GitConnection("t", "", "gitlocal://" + host_repo);
+    }
+
+    #! creates a repository with one committed file
+    private string makeRepo(string name, string content) {
+        string path = dir + "/" + name;
+        Git::GitRepository repo = Git::GitRepository::init(path);
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@example.com");
+        repo.writeFileString("file.txt", content);
+        repo.commit("initial");
+        return path;
+    }
+
+    #! returns a Program of the given kind
+    private Program getProgram(string kind, string mode) {
+        Program p;
+        switch (kind) {
+            case "nofs":
+                p = new Program(PO_NEW_STYLE | PO_NO_FILESYSTEM);
+                break;
+            case "nonet":
+                p = new Program(PO_NEW_STYLE | PO_NO_NETWORK);
+                break;
+            default:
+                p = new Program(PO_NEW_STYLE);
+                break;
+        }
+        p.setExecMode(Modes{mode});
+        p.parse(Source, kind);
+        return p;
+    }
+}

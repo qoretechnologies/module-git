@@ -139,8 +139,18 @@ public class GitConnection inherits AbstractConnectionWithInfo {
     }
 
     #! Returns a data provider for this connection
+    /** The provider's repository is the one that get() opens: for code that was lent the connection by the code that
+        created it and that is restricted from the \c FILESYSTEM or \c NETWORK functional domain, from the URL that
+        the connection's creator gave, so that changing the connection's public members (\c url, \c urlh, \c opts)
+        cannot point it to another repository
+
+        @throw PERMISSION-DENIED the calling code was lent the connection, is restricted from the \c FILESYSTEM or
+        \c NETWORK functional domain, and the connection's URL or options are not the ones that its creator gave
+    */
     DataProvider::AbstractDataProvider getDataProvider(*hash<auto> constructor_options) {
         load_module("GitDataProvider");
+        # get() creates the repository from a private copy of the connection with its creator's members for
+        # restricted code that was lent the connection (module-git#8)
         return create_object("GitDataProvider::GitDataProvider", get());
     }
 }

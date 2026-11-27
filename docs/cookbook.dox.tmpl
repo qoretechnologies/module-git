@@ -278,7 +278,9 @@
 
     A \c path given by code restricted from the \c FILESYSTEM functional domain is refused with
     \c PERMISSION-DENIED, also through a factory that the host lent to it; a virtual repository stays usable for such
-    code.
+    code.  A @ref GitConnections::GitConnection "GitConnection" that the host creates and lends to restricted code
+    opens the repository of the URL that the host gave: a change of the connection's members by that code is
+    refused.
 
     @section gitcookbookforge GitForgeHelper (PR/MR)
 
