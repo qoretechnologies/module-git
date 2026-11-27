@@ -1,0 +1,190 @@
+#!/usr/bin/env qore
+# -*- mode: qore; indent-tabs-mode: nil -*-
+
+/*  PathNormalization.qtest Copyright (C) 2026 Qore Technologies, s.r.o.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+%modern
+
+%prepend-module-path "${SCRIPT_DIR}/../build"
+%prepend-module-path "${SCRIPT_DIR}/../qlib"
+
+%requires git >= 1.0
+%requires FsUtil
+%requires DataProvider
+%requires GitDataProvider
+%requires QUnit
+
+%exec-class PathNormalizationTest
+
+#! Tests that repository paths with "." and empty components are normalized (module-git#11)
+/** A repository-relative path is normalized as git stores paths: \c "." and empty components are removed, so the
+    path that is written to the working tree, kept in the virtual tree, staged and committed is the same, and the
+    file can be read, found, unstaged and deleted by either spelling.  A path that names no file after normalization
+    (its last component is empty or \c ".") is rejected with GIT-PATH-ERROR.
+*/
+class PathNormalizationTest inherits QUnit::Test {
+    private {
+        #! paths and their normalized forms
+        const Paths = {
+            "./x.txt": "x.txt",
+            "a//d.txt": "a/d.txt",
+            "b/./c.txt": "b/c.txt",
+            ".//./e/.//f.txt": "e/f.txt",
+            "g.txt": "g.txt",
+            "h/i.txt": "h/i.txt",
+        };
+
+        #! paths that name no file
+        const NoFilePaths = (".", "./", "a/", "a/.", "a//", "./.", "//", "/", "");
+
+        #! paths that are refused otherwise
+        const RefusedPaths = ("./../x", "a/./../../x", "./.git/config", "a//.git/x", "/abs");
+    }
+
+    private {
+        #! the directory of the test
+        string dir;
+        #! a counter for unique names
+        int n;
+    }
+
+    constructor() : QUnit::Test("PathNormalization", "1.0", \ARGV) {
+        dir = make_tmp_dir("git-path-normalization-");
+        addTestCase("disk repository", \testDisk());
+        addTestCase("virtual repository", \testVirtual());
+        addTestCase("add and unstage", \testIndex());
+        addTestCase("data provider", \testDataProvider());
+        addTestCase("refused paths", \testRefused());
+        set_return_value(main());
+    }
+
+    destructor() {
+        if (dir) {
+            remove_tree(dir);
+        }
+    }
+
+    testDisk() {
+        string path = sprintf("%s/disk-%d", dir, ++n);
+        Git::GitRepository repo = getRepo(Git::GitRepository::init(path));
+        checkRepo(repo, path);
+    }
+
+    testVirtual() {
+        checkRepo(getRepo(Git::GitRepository::createVirtual()));
+    }
+
+    testIndex() {
+        string path = sprintf("%s/index-%d", dir, ++n);
+        Git::GitRepository repo = getRepo(Git::GitRepository::init(path));
+        # files that the working tree has, staged by a path that is not normalized
+        mkdir(path + "/a");
+        foreach string file in (("x.txt", "a/d.txt")) {
+            File f();
+            f.open2(path + "/" + file, O_CREAT | O_WRONLY | O_TRUNC);
+            f.write(file);
+        }
+        repo.add("./x.txt");
+        repo.add("a//d.txt");
+        hash<string, int> status = repo.status();
+        assertEq(GIT_STATUS_INDEX_NEW, status."x.txt", "x.txt staged");
+        assertEq(GIT_STATUS_INDEX_NEW, status."a/d.txt", "a/d.txt staged");
+        assertEq(("a/d.txt", "x.txt"), sort(keys status));
+        repo.unstage(".//x.txt");
+        status = repo.status();
+        assertEq(GIT_STATUS_WT_NEW, status."x.txt", "x.txt unstaged");
+        assertEq(GIT_STATUS_INDEX_NEW, status."a/d.txt", "a/d.txt still staged");
+    }
+
+    testDataProvider() {
+        string path = sprintf("%s/dp-%d", dir, ++n);
+        getRepo(Git::GitRepository::init(path));
+        GitDataProvider::GitDataProvider dp({"path": path});
+        dp.getChildProviderEx("write-file").doRequest({"path": "./dp//x.txt", "content": "dp"});
+        assertEq("dp", dp.getChildProviderEx("read-file").doRequest({"path": "dp/x.txt"}).content);
+        dp.getChildProviderEx("commit").doRequest({"message": "dp"});
+        assertEq(("dp/x.txt",), dp.getChildProviderEx("list-files").doRequest().files);
+        assertEq({}, dp.getChildProviderEx("status").doRequest().files ?? {});
+    }
+
+    testRefused() {
+        Git::GitRepository repo = getRepo(Git::GitRepository::createVirtual());
+        foreach string path in (NoFilePaths + RefusedPaths) {
+            assertThrows("GIT-PATH-ERROR", \repo.writeFileString(), (path, "x"), sprintf("write %y", path));
+            assertThrows("GIT-PATH-ERROR", \repo.readFile(), path, sprintf("read %y", path));
+            assertThrows("GIT-PATH-ERROR", \repo.deleteFile(), path, sprintf("delete %y", path));
+            assertThrows("GIT-PATH-ERROR", \repo.fileExists(), path, sprintf("exists %y", path));
+        }
+        assertEq((), repo.listFiles(), "nothing written");
+        string path = sprintf("%s/refused-%d", dir, ++n);
+        repo = getRepo(Git::GitRepository::init(path));
+        foreach string p in (NoFilePaths + RefusedPaths) {
+            assertThrows("GIT-PATH-ERROR", \repo.writeFileString(), (p, "x"), sprintf("disk write %y", p));
+            assertThrows("GIT-PATH-ERROR", \repo.add(), p, sprintf("add %y", p));
+        }
+        assertEq({}, repo.status(), "nothing written to disk");
+    }
+
+    #! writes, reads, commits and deletes files by paths that are not normalized
+    private checkRepo(Git::GitRepository repo, *string path) {
+        foreach hash<auto> i in (Paths.pairIterator()) {
+            repo.writeFileString(i.key, i.value);
+        }
+        list<string> norm = sort(Paths.values());
+        assertEq(norm, sort(repo.listFiles()), "virtual tree");
+        if (path) {
+            # the files are written to the working tree and staged by their normalized paths
+            hash<string, int> status = repo.status();
+            assertEq(norm, sort(keys status), "status");
+            map assertEq(GIT_STATUS_INDEX_NEW, status{$1}, $1 + " staged"), norm;
+            map assertEq($1, ReadOnlyFile::readTextFile(path + "/" + $1), $1 + " in the working tree"), norm;
+        }
+        repo.commit("normalized");
+        if (path) {
+            assertEq({}, repo.status(), "all committed");
+        }
+        # the committed tree has the normalized paths
+        Git::GitRepository check = path ? new Git::GitRepository(path) : repo;
+        assertEq(norm, sort(check.listFiles()), "committed");
+        foreach hash<auto> i in (Paths.pairIterator()) {
+            # either spelling reads and finds the file
+            assertEq(i.value, repo.readFileString(i.key), i.key + " read");
+            assertEq(i.value, repo.readFileString(i.value), i.value + " read");
+            assertTrue(repo.fileExists(i.key), i.key + " exists");
+        }
+        # a file is deleted by a path that is not normalized
+        repo.deleteFile(".//x.txt");
+        repo.commit("deleted");
+        assertFalse(repo.fileExists("x.txt"), "x.txt deleted");
+        assertFalse(inlist("x.txt", check.listFiles()), "x.txt deleted from the committed tree");
+        if (path) {
+            assertFalse(is_file(path + "/x.txt"), "x.txt deleted from the working tree");
+        }
+    }
+
+    #! configures the identity of a repository
+    private Git::GitRepository getRepo(Git::GitRepository repo) {
+        repo.configSet("user.name", "Test");
+        repo.configSet("user.email", "test@example.com");
+        return repo;
+    }
+}

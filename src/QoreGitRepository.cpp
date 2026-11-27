@@ -69,16 +69,24 @@ static bool isGitDirComponent(const char* p, size_t len) {
     return (len == 4 && !strncasecmp(p, ".git", 4)) || (len == 5 && !strncasecmp(p, "git~1", 5));
 }
 
-//! Validates a repository-relative path
+//! Validates and normalizes a repository-relative path
 /** Rejects empty paths, absolute paths, any ".." path component to prevent escaping
     the repository working tree (path traversal), and any component that names the git
     directory (see isGitDirComponent()). This is enforced unconditionally, i.e.
     independently of whether a QoreSandboxManager is active, since the sandbox check is a
     no-op when no sandbox manager is installed.
 
+    The path is normalized as git stores it: empty components and \c "." components are removed (\c "./x" and
+    \c "a//b" name \c "x" and \c "a/b"), so that the path that is written to the working tree, kept in the virtual
+    tree, staged and committed is the same.  A path that names no file after normalization (\c "." or one that ends
+    with \c "/") is rejected.
+
+    @param path the path given
+    @param norm the normalized path, set if the path is accepted
+
     @return true if the path is safe to use, false (with an exception raised) otherwise
 */
-static bool validateRepoPath(const char* path, ExceptionSink* xsink) {
+static bool validateRepoPath(const char* path, std::string& norm, ExceptionSink* xsink) {
     if (!path || !*path) {
         xsink->raiseException("GIT-PATH-ERROR", "an empty file path is not allowed");
         return false;
@@ -88,9 +96,10 @@ static bool validateRepoPath(const char* path, ExceptionSink* xsink) {
             "repository paths must be relative to the working tree", path);
         return false;
     }
+    norm.clear();
     // reject any ".." path component (handles "..", "../x", "x/../y", "x/..")
     const char* p = path;
-    while (*p) {
+    while (true) {
         const char* slash = strchr(p, '/');
         size_t len = slash ? static_cast<size_t>(slash - p) : strlen(p);
         if (len == 2 && p[0] == '.' && p[1] == '.') {
@@ -103,7 +112,20 @@ static bool validateRepoPath(const char* path, ExceptionSink* xsink) {
                 "path '%s' names the git directory, which is not part of the working tree", path);
             return false;
         }
+        // empty and "." components name the directory that they are in
+        bool named = len && !(len == 1 && p[0] == '.');
+        if (named) {
+            if (!norm.empty()) {
+                norm += '/';
+            }
+            norm.append(p, len);
+        }
         if (!slash) {
+            // a path whose last component is empty or "." names a directory
+            if (!named) {
+                xsink->raiseException("GIT-PATH-ERROR", "path '%s' does not name a file", path);
+                return false;
+            }
             break;
         }
         p = slash + 1;
@@ -898,9 +920,11 @@ int QoreGitRepository::addToIndex(const char* path, ExceptionSink* xsink) {
         xsink->raiseException("GIT-MODE-ERROR", "add() requires a disk-backed repository; use writeFile() for virtual repos");
         return -1;
     }
-    if (!validateRepoPath(path, xsink)) {
+    std::string norm_path;
+    if (!validateRepoPath(path, norm_path, xsink)) {
         return -1;
     }
+    path = norm_path.c_str();
 
     git_index* index = nullptr;
     int rc = git_repository_index(&index, m_repo);
@@ -931,9 +955,11 @@ int QoreGitRepository::removeFromIndex(const char* path, ExceptionSink* xsink) {
         xsink->raiseException("GIT-MODE-ERROR", "remove() requires a disk-backed repository; use deleteFile() for virtual repos");
         return -1;
     }
-    if (!validateRepoPath(path, xsink)) {
+    std::string norm_path;
+    if (!validateRepoPath(path, norm_path, xsink)) {
         return -1;
     }
+    path = norm_path.c_str();
 
     git_index* index = nullptr;
     int rc = git_repository_index(&index, m_repo);
@@ -962,9 +988,11 @@ BinaryNode* QoreGitRepository::readFile(const char* path, ExceptionSink* xsink) 
     if (!checkRepo(xsink)) {
         return nullptr;
     }
-    if (!validateRepoPath(path, xsink)) {
+    std::string norm_path;
+    if (!validateRepoPath(path, norm_path, xsink)) {
         return nullptr;
     }
+    path = norm_path.c_str();
 
     // First check the virtual tree (staged/written files)
     auto it = m_virtual_tree.find(path);
@@ -1054,9 +1082,11 @@ int QoreGitRepository::writeFile(const char* path, const void* data, size_t len,
     if (!checkRepo(xsink)) {
         return -1;
     }
-    if (!validateRepoPath(path, xsink)) {
+    std::string norm_path;
+    if (!validateRepoPath(path, norm_path, xsink)) {
         return -1;
     }
+    path = norm_path.c_str();
 
     // Create blob from buffer
     git_oid blob_oid;
@@ -1135,9 +1165,11 @@ int QoreGitRepository::deleteFile(const char* path, ExceptionSink* xsink) {
     if (!checkRepo(xsink)) {
         return -1;
     }
-    if (!validateRepoPath(path, xsink)) {
+    std::string norm_path;
+    if (!validateRepoPath(path, norm_path, xsink)) {
         return -1;
     }
+    path = norm_path.c_str();
 
     auto it = m_virtual_tree.find(path);
     if (it != m_virtual_tree.end()) {
@@ -1179,9 +1211,11 @@ bool QoreGitRepository::fileExists(const char* path, ExceptionSink* xsink) {
     if (!checkRepo(xsink)) {
         return false;
     }
-    if (!validateRepoPath(path, xsink)) {
+    std::string norm_path;
+    if (!validateRepoPath(path, norm_path, xsink)) {
         return false;
     }
+    path = norm_path.c_str();
 
     // Check virtual tree first
     if (m_virtual_tree.count(path)) {

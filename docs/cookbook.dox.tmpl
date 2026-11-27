@@ -288,6 +288,9 @@
     opens the repository of the URL that the host gave: a change of the connection's members by that code is
     refused.
 
+    Repository paths are normalized as git stores them: \c "." and empty components are removed, so
+    \c "./config//db.yaml" is written, staged and committed as \c "config/db.yaml".
+
     @section gitcookbookforge GitForgeHelper (PR/MR)
 
     @code{.py}
